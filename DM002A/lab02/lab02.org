@@ -1,0 +1,1152 @@
+#+startup: align indent contents
+
+
+* DM002A - Laboratório de Análise Demográfica I
+
+** Laboratório 2
+
+Para o laboratório 2 foi necessário acessar dados populacionais provenientes do SIDRA/IBGE, SINASC/SUS e SIM/SUS.
+
+Embora se possa trabalhar com arquivos do MS Excel, optou-se por consultar os dados diretamente via GNU R para facilitar o tratamento dos dados e a confecção de tabelas e gráficos pedidos na atividade.
+
+Para tanto são necessários os seguintes pacotes do GNU R para confeccionar as análises:
+
+#+begin_src R :results none :session
+library(RCurl)         # getURL
+library(jsonlite)      # fromJSOn
+library(dplyr)         # mutate, %>% ,select, filter, transmute, etc...
+library(readr)         # write_csv2
+library(tidyr)         # pivot_wider, pivot_longer
+library(stringr)       # str_detect, str_sub
+library(ggplot2)       # ggplot, geom_line, geom_point, ...
+library(microdatasus)  # fetch_datasus
+#+end_src
+
+
+*** SIDRA/IBGE
+
+Por meio do endereço https://sidra.ibge.gov.br/tabela/200 é possível montar a requisição dos dados necessários
+
+- da população residente;
+- no Nordeste (cod. 2), em Pernambuco (cod. 26) e em Recife (cod. 2611606);
+- por sexo;
+- por faixa etária quinquenal;
+- para os anos de 1980, 1991, 2000, 2010 e 2020
+
+e que resulta no [[https://sidra.ibge.gov.br/tabela/200#/n2/2/n3/26/n6/2611606/v/allxp/p/last%204/c2/allxt/c1/0/c58/allxt/d/v93%200/l/v,p+c2+c1,t+c58][link definitivo]] com os resulados acessáveis no navegador bem como no /endpoint/ da API do SIDRA/IBGE utilizado nas análises:
+https://apisidra.ibge.gov.br/values/t/200/n2/2/n3/26/n6/2611606/v/allxp/p/last%204/c2/allxt/c1/0/c58/allxt/d/v93%200
+
+Esse /endpoint/ pode ser consultado inclusive de qualquer terminal de linha de comando
+#+begin_src sh :results output
+curl --location --request GET 'https://apisidra.ibge.gov.br/values/t/200/n2/2/n3/26/n6/2611606/v/allxp/p/last%204/c2/allxt/c1/0/c58/allxt/d/v93%200' |
+	head -40
+#+end_src
+
+#+RESULTS:
+#+begin_example
+[
+  {
+    "NC": "Nível Territorial (Código)",
+    "NN": "Nível Territorial",
+    "MC": "Unidade de Medida (Código)",
+    "MN": "Unidade de Medida",
+    "V": "Valor",
+    "D1C": "Grande Região, Unidade da Federação e Município (Código)",
+    "D1N": "Grande Região, Unidade da Federação e Município",
+    "D2C": "Variável (Código)",
+    "D2N": "Variável",
+    "D3C": "Ano (Código)",
+    "D3N": "Ano",
+    "D4C": "Sexo (Código)",
+    "D4N": "Sexo",
+    "D5C": "Situação do domicílio (Código)",
+    "D5N": "Situação do domicílio",
+    "D6C": "Grupo de idade (Código)",
+    "D6N": "Grupo de idade"
+  },
+  {
+    "NC": "2",
+    "NN": "Grande Região",
+    "MC": "45",
+    "MN": "Pessoas",
+    "V": "2778296",
+    "D1C": "2",
+    "D1N": "Nordeste",
+    "D2C": "93",
+    "D2N": "População residente",
+    "D3C": "1980",
+    "D3N": "1980",
+    "D4C": "4",
+    "D4N": "Homens",
+    "D5C": "0",
+    "D5N": "Total",
+    "D6C": "1140",
+    "D6N": "0 a 4 anos"
+  },
+  {
+#+end_example
+
+**** Tabela base para as análises
+
+#+begin_src R :colnames yes :session
+url_API <- # Endpoint da API
+  'https://apisidra.ibge.gov.br/values/t/200/n2/2/n3/26/n6/2611606/v/allxp/p/last%204/c2/allxt/c1/0/c58/allxt/d/v93%200'
+
+q02_sidra <- RCurl::getURL( url = url_API ) %>%   # baixa o conteúdo da URL em formato JSON
+  jsonlite::fromJSON() %>%                        # converte formato de JSON para data frame
+  tibble() %>%                                    # converte formato de data frame para tibble
+  select( NN, D1N, D3N, D4N, D6N, V) %>%          # somente as colunas relevantes para análises e gráficos
+  filter(
+    V != 'Valor', V != '...'                      # ignora registros com '...' e 'Valor' na coluna V
+   ,str_detect( D6N, ' a |100 anos')              # somente faixas etárias quinquenais
+  ) %>%
+  rename(                                         # renomeia as colunas
+    nivel_territorial = NN
+   ,local = D1N
+   ,ano = D3N
+   ,sexo = D4N
+   ,idade = D6N
+   ,populacao = V
+  ) %>%
+  mutate(
+    ano = as.numeric(ano)                       # converte ano para número
+   ,populacao = as.numeric(populacao)           # converte populacao para número
+   ,populacao_tipo = case_when(
+      ## para cálculo da RDJ (Razão de Dependência de Jovens)
+      idade == '0 a 4 anos'       ~ 'jovem'
+     ,idade == '5 a 9 anos'       ~ 'jovem'
+     ,idade == '10 a 14 anos'     ~ 'jovem'
+      ## para cálculo da RDI (Razão de Dependência de Idosos)
+     ,idade == '65 a 69 anos'     ~ 'idoso'
+     ,idade == '70 a 74 anos'     ~ 'idoso'
+     ,idade == '75 a 79 anos'     ~ 'idoso'
+     ,idade == '80 a 84 anos'     ~ 'idoso'
+     ,idade == '85 a 89 anos'     ~ 'idoso'
+     ,idade == '90 a 94 anos'     ~ 'idoso'
+     ,idade == '95 a 99 anos'     ~ 'idoso'
+     ,idade == '100 anos ou mais' ~ 'idoso'
+      ## População economicamente ativa (15 a 64 anos) para cálculo da RDI e RDJ
+     ,TRUE ~ 'economicamente_ativa'
+    )
+   ,idade = factor(
+      idade
+     ,levels = c('0 a 4 anos'                 # ordena as faixas etárias após transformar variável para fator
+                ,'5 a 9 anos'
+                ,'10 a 14 anos'
+                ,'15 a 19 anos'
+                ,'20 a 24 anos'
+                ,'25 a 29 anos'
+                ,'30 a 34 anos'
+                ,'35 a 39 anos'
+                ,'40 a 44 anos'
+                ,'45 a 49 anos'
+                ,'50 a 54 anos'
+                ,'55 a 59 anos'
+                ,'60 a 64 anos'
+                ,'65 a 69 anos'
+                ,'70 a 74 anos'
+                ,'75 a 79 anos'
+                ,'80 a 84 anos'
+                ,'85 a 89 anos'
+                ,'90 a 94 anos'
+                ,'95 a 99 anos'
+                ,'100 anos ou mais'
+                 )
+    )
+   ,idade_80m = factor(
+      case_when(
+        idade == '80 a 84 anos' ~ '80 anos ou mais'
+       ,idade == '85 a 89 anos' ~ '80 anos ou mais'
+       ,idade == '90 a 94 anos' ~ '80 anos ou mais'
+       ,idade == '95 a 99 anos' ~ '80 anos ou mais'
+       ,idade == '100 anos ou mais' ~ '80 anos ou mais'
+       ,TRUE ~ as.character(idade)
+      )
+     ,levels = c('0 a 4 anos'
+                ,'5 a 9 anos'
+                ,'10 a 14 anos'
+                ,'15 a 19 anos'
+                ,'20 a 24 anos'
+                ,'25 a 29 anos'
+                ,'30 a 34 anos'
+                ,'35 a 39 anos'
+                ,'40 a 44 anos'
+                ,'45 a 49 anos'
+                ,'50 a 54 anos'
+                ,'55 a 59 anos'
+                ,'60 a 64 anos'
+                ,'65 a 69 anos'
+                ,'70 a 74 anos'
+                ,'75 a 79 anos'
+                ,'80 anos ou mais'
+                 )
+    )
+  )
+
+q02_sidra
+#+end_src
+
+#+RESULTS:
+| nivel_territorial    | local       |  ano | sexo     | idade            | populacao | populacao_tipo       | idade_80m       |
+|----------------------+-------------+------+----------+------------------+-----------+----------------------+-----------------|
+| Grande Região        | Nordeste    | 1980 | Homens   | 0 a 4 anos       |   2778296 | jovem                | 0 a 4 anos      |
+| Grande Região        | Nordeste    | 1980 | Homens   | 5 a 9 anos       |   2480982 | jovem                | 5 a 9 anos      |
+| Grande Região        | Nordeste    | 1980 | Homens   | 10 a 14 anos     |   2322782 | jovem                | 10 a 14 anos    |
+| Grande Região        | Nordeste    | 1980 | Homens   | 15 a 19 anos     |   1970666 | economicamente_ativa | 15 a 19 anos    |
+| Grande Região        | Nordeste    | 1980 | Homens   | 20 a 24 anos     |   1393882 | economicamente_ativa | 20 a 24 anos    |
+| Grande Região        | Nordeste    | 1980 | Homens   | 25 a 29 anos     |   1078482 | economicamente_ativa | 25 a 29 anos    |
+| Grande Região        | Nordeste    | 1980 | Homens   | 30 a 34 anos     |    923290 | economicamente_ativa | 30 a 34 anos    |
+| Grande Região        | Nordeste    | 1980 | Homens   | 35 a 39 anos     |    786453 | economicamente_ativa | 35 a 39 anos    |
+| Grande Região        | Nordeste    | 1980 | Homens   | 40 a 44 anos     |    725833 | economicamente_ativa | 40 a 44 anos    |
+| Grande Região        | Nordeste    | 1980 | Homens   | 45 a 49 anos     |    552760 | economicamente_ativa | 45 a 49 anos    |
+| Grande Região        | Nordeste    | 1980 | Homens   | 50 a 54 anos     |    517378 | economicamente_ativa | 50 a 54 anos    |
+| Grande Região        | Nordeste    | 1980 | Homens   | 55 a 59 anos     |    422329 | economicamente_ativa | 55 a 59 anos    |
+| Grande Região        | Nordeste    | 1980 | Homens   | 60 a 64 anos     |    331502 | economicamente_ativa | 60 a 64 anos    |
+| Grande Região        | Nordeste    | 1980 | Homens   | 65 a 69 anos     |    313061 | idoso                | 65 a 69 anos    |
+| Grande Região        | Nordeste    | 1980 | Homens   | 70 a 74 anos     |    210253 | idoso                | 70 a 74 anos    |
+| Grande Região        | Nordeste    | 1980 | Homens   | 75 a 79 anos     |    132328 | idoso                | 75 a 79 anos    |
+| Grande Região        | Nordeste    | 1980 | Mulheres | 0 a 4 anos       |   2743395 | jovem                | 0 a 4 anos      |
+| Grande Região        | Nordeste    | 1980 | Mulheres | 5 a 9 anos       |   2440109 | jovem                | 5 a 9 anos      |
+| Grande Região        | Nordeste    | 1980 | Mulheres | 10 a 14 anos     |   2335573 | jovem                | 10 a 14 anos    |
+| Grande Região        | Nordeste    | 1980 | Mulheres | 15 a 19 anos     |   2055162 | economicamente_ativa | 15 a 19 anos    |
+| Grande Região        | Nordeste    | 1980 | Mulheres | 20 a 24 anos     |   1547309 | economicamente_ativa | 20 a 24 anos    |
+| Grande Região        | Nordeste    | 1980 | Mulheres | 25 a 29 anos     |   1215756 | economicamente_ativa | 25 a 29 anos    |
+| Grande Região        | Nordeste    | 1980 | Mulheres | 30 a 34 anos     |   1015637 | economicamente_ativa | 30 a 34 anos    |
+| Grande Região        | Nordeste    | 1980 | Mulheres | 35 a 39 anos     |    874331 | economicamente_ativa | 35 a 39 anos    |
+| Grande Região        | Nordeste    | 1980 | Mulheres | 40 a 44 anos     |    791084 | economicamente_ativa | 40 a 44 anos    |
+| Grande Região        | Nordeste    | 1980 | Mulheres | 45 a 49 anos     |    611458 | economicamente_ativa | 45 a 49 anos    |
+| Grande Região        | Nordeste    | 1980 | Mulheres | 50 a 54 anos     |    553486 | economicamente_ativa | 50 a 54 anos    |
+| Grande Região        | Nordeste    | 1980 | Mulheres | 55 a 59 anos     |    426584 | economicamente_ativa | 55 a 59 anos    |
+| Grande Região        | Nordeste    | 1980 | Mulheres | 60 a 64 anos     |    347187 | economicamente_ativa | 60 a 64 anos    |
+| Grande Região        | Nordeste    | 1980 | Mulheres | 65 a 69 anos     |    319262 | idoso                | 65 a 69 anos    |
+| Grande Região        | Nordeste    | 1980 | Mulheres | 70 a 74 anos     |    219776 | idoso                | 70 a 74 anos    |
+| Grande Região        | Nordeste    | 1980 | Mulheres | 75 a 79 anos     |    146459 | idoso                | 75 a 79 anos    |
+| Grande Região        | Nordeste    | 1991 | Homens   | 0 a 4 anos       |   2741118 | jovem                | 0 a 4 anos      |
+| Grande Região        | Nordeste    | 1991 | Homens   | 5 a 9 anos       |   2908194 | jovem                | 5 a 9 anos      |
+| Grande Região        | Nordeste    | 1991 | Homens   | 10 a 14 anos     |   2784171 | jovem                | 10 a 14 anos    |
+| Grande Região        | Nordeste    | 1991 | Homens   | 15 a 19 anos     |   2354686 | economicamente_ativa | 15 a 19 anos    |
+| Grande Região        | Nordeste    | 1991 | Homens   | 20 a 24 anos     |   1846049 | economicamente_ativa | 20 a 24 anos    |
+| Grande Região        | Nordeste    | 1991 | Homens   | 25 a 29 anos     |   1555101 | economicamente_ativa | 25 a 29 anos    |
+| Grande Região        | Nordeste    | 1991 | Homens   | 30 a 34 anos     |   1268686 | economicamente_ativa | 30 a 34 anos    |
+| Grande Região        | Nordeste    | 1991 | Homens   | 35 a 39 anos     |   1058230 | economicamente_ativa | 35 a 39 anos    |
+| Grande Região        | Nordeste    | 1991 | Homens   | 40 a 44 anos     |    939819 | economicamente_ativa | 40 a 44 anos    |
+| Grande Região        | Nordeste    | 1991 | Homens   | 45 a 49 anos     |    747513 | economicamente_ativa | 45 a 49 anos    |
+| Grande Região        | Nordeste    | 1991 | Homens   | 50 a 54 anos     |    640814 | economicamente_ativa | 50 a 54 anos    |
+| Grande Região        | Nordeste    | 1991 | Homens   | 55 a 59 anos     |    490429 | economicamente_ativa | 55 a 59 anos    |
+| Grande Região        | Nordeste    | 1991 | Homens   | 60 a 64 anos     |    435607 | economicamente_ativa | 60 a 64 anos    |
+| Grande Região        | Nordeste    | 1991 | Homens   | 65 a 69 anos     |    381594 | idoso                | 65 a 69 anos    |
+| Grande Região        | Nordeste    | 1991 | Homens   | 70 a 74 anos     |    272454 | idoso                | 70 a 74 anos    |
+| Grande Região        | Nordeste    | 1991 | Homens   | 75 a 79 anos     |    193085 | idoso                | 75 a 79 anos    |
+| Grande Região        | Nordeste    | 1991 | Mulheres | 0 a 4 anos       |   2683888 | jovem                | 0 a 4 anos      |
+| Grande Região        | Nordeste    | 1991 | Mulheres | 5 a 9 anos       |   2848665 | jovem                | 5 a 9 anos      |
+| Grande Região        | Nordeste    | 1991 | Mulheres | 10 a 14 anos     |   2779511 | jovem                | 10 a 14 anos    |
+| Grande Região        | Nordeste    | 1991 | Mulheres | 15 a 19 anos     |   2400996 | economicamente_ativa | 15 a 19 anos    |
+| Grande Região        | Nordeste    | 1991 | Mulheres | 20 a 24 anos     |   1968451 | economicamente_ativa | 20 a 24 anos    |
+| Grande Região        | Nordeste    | 1991 | Mulheres | 25 a 29 anos     |   1694792 | economicamente_ativa | 25 a 29 anos    |
+| Grande Região        | Nordeste    | 1991 | Mulheres | 30 a 34 anos     |   1386333 | economicamente_ativa | 30 a 34 anos    |
+| Grande Região        | Nordeste    | 1991 | Mulheres | 35 a 39 anos     |   1185807 | economicamente_ativa | 35 a 39 anos    |
+| Grande Região        | Nordeste    | 1991 | Mulheres | 40 a 44 anos     |   1020028 | economicamente_ativa | 40 a 44 anos    |
+| Grande Região        | Nordeste    | 1991 | Mulheres | 45 a 49 anos     |    819107 | economicamente_ativa | 45 a 49 anos    |
+| Grande Região        | Nordeste    | 1991 | Mulheres | 50 a 54 anos     |    710455 | economicamente_ativa | 50 a 54 anos    |
+| Grande Região        | Nordeste    | 1991 | Mulheres | 55 a 59 anos     |    577111 | economicamente_ativa | 55 a 59 anos    |
+| Grande Região        | Nordeste    | 1991 | Mulheres | 60 a 64 anos     |    501380 | economicamente_ativa | 60 a 64 anos    |
+| Grande Região        | Nordeste    | 1991 | Mulheres | 65 a 69 anos     |    414912 | idoso                | 65 a 69 anos    |
+| Grande Região        | Nordeste    | 1991 | Mulheres | 70 a 74 anos     |    296147 | idoso                | 70 a 74 anos    |
+| Grande Região        | Nordeste    | 1991 | Mulheres | 75 a 79 anos     |    214928 | idoso                | 75 a 79 anos    |
+| Grande Região        | Nordeste    | 2000 | Homens   | 0 a 4 anos       |   2570580 | jovem                | 0 a 4 anos      |
+| Grande Região        | Nordeste    | 2000 | Homens   | 5 a 9 anos       |   2609496 | jovem                | 5 a 9 anos      |
+| Grande Região        | Nordeste    | 2000 | Homens   | 10 a 14 anos     |   2801803 | jovem                | 10 a 14 anos    |
+| Grande Região        | Nordeste    | 2000 | Homens   | 15 a 19 anos     |   2810543 | economicamente_ativa | 15 a 19 anos    |
+| Grande Região        | Nordeste    | 2000 | Homens   | 20 a 24 anos     |   2303924 | economicamente_ativa | 20 a 24 anos    |
+| Grande Região        | Nordeste    | 2000 | Homens   | 25 a 29 anos     |   1791534 | economicamente_ativa | 25 a 29 anos    |
+| Grande Região        | Nordeste    | 2000 | Homens   | 30 a 34 anos     |   1613194 | economicamente_ativa | 30 a 34 anos    |
+| Grande Região        | Nordeste    | 2000 | Homens   | 35 a 39 anos     |   1451496 | economicamente_ativa | 35 a 39 anos    |
+| Grande Região        | Nordeste    | 2000 | Homens   | 40 a 44 anos     |   1187147 | economicamente_ativa | 40 a 44 anos    |
+| Grande Região        | Nordeste    | 2000 | Homens   | 45 a 49 anos     |    975699 | economicamente_ativa | 45 a 49 anos    |
+| Grande Região        | Nordeste    | 2000 | Homens   | 50 a 54 anos     |    834876 | economicamente_ativa | 50 a 54 anos    |
+| Grande Região        | Nordeste    | 2000 | Homens   | 55 a 59 anos     |    654421 | economicamente_ativa | 55 a 59 anos    |
+| Grande Região        | Nordeste    | 2000 | Homens   | 60 a 64 anos     |    564229 | economicamente_ativa | 60 a 64 anos    |
+| Grande Região        | Nordeste    | 2000 | Homens   | 65 a 69 anos     |    418069 | idoso                | 65 a 69 anos    |
+| Grande Região        | Nordeste    | 2000 | Homens   | 70 a 74 anos     |    342281 | idoso                | 70 a 74 anos    |
+| Grande Região        | Nordeste    | 2000 | Homens   | 75 a 79 anos     |    244466 | idoso                | 75 a 79 anos    |
+| Grande Região        | Nordeste    | 2000 | Homens   | 80 a 84 anos     |    148571 | idoso                | 80 anos ou mais |
+| Grande Região        | Nordeste    | 2000 | Homens   | 85 a 89 anos     |     76417 | idoso                | 80 anos ou mais |
+| Grande Região        | Nordeste    | 2000 | Homens   | 90 a 94 anos     |     24274 | idoso                | 80 anos ou mais |
+| Grande Região        | Nordeste    | 2000 | Homens   | 95 a 99 anos     |      6728 | idoso                | 80 anos ou mais |
+| Grande Região        | Nordeste    | 2000 | Homens   | 100 anos ou mais |      1061 | idoso                | 80 anos ou mais |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 0 a 4 anos       |   2495593 | jovem                | 0 a 4 anos      |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 5 a 9 anos       |   2541081 | jovem                | 5 a 9 anos      |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 10 a 14 anos     |   2752702 | jovem                | 10 a 14 anos    |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 15 a 19 anos     |   2767878 | economicamente_ativa | 15 a 19 anos    |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 20 a 24 anos     |   2324339 | economicamente_ativa | 20 a 24 anos    |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 25 a 29 anos     |   1891315 | economicamente_ativa | 25 a 29 anos    |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 30 a 34 anos     |   1740337 | economicamente_ativa | 30 a 34 anos    |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 35 a 39 anos     |   1569892 | economicamente_ativa | 35 a 39 anos    |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 40 a 44 anos     |   1302457 | economicamente_ativa | 40 a 44 anos    |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 45 a 49 anos     |   1086287 | economicamente_ativa | 45 a 49 anos    |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 50 a 54 anos     |    922556 | economicamente_ativa | 50 a 54 anos    |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 55 a 59 anos     |    759271 | economicamente_ativa | 55 a 59 anos    |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 60 a 64 anos     |    670726 | economicamente_ativa | 60 a 64 anos    |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 65 a 69 anos     |    505716 | idoso                | 65 a 69 anos    |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 70 a 74 anos     |    407126 | idoso                | 70 a 74 anos    |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 75 a 79 anos     |    280233 | idoso                | 75 a 79 anos    |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 80 a 84 anos     |    179824 | idoso                | 80 anos ou mais |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 85 a 89 anos     |     98043 | idoso                | 80 anos ou mais |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 90 a 94 anos     |     36748 | idoso                | 80 anos ou mais |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 95 a 99 anos     |     12086 | idoso                | 80 anos ou mais |
+| Grande Região        | Nordeste    | 2000 | Mulheres | 100 anos ou mais |      7468 | idoso                | 80 anos ou mais |
+| Grande Região        | Nordeste    | 2010 | Homens   | 0 a 4 anos       |   2156068 | jovem                | 0 a 4 anos      |
+| Grande Região        | Nordeste    | 2010 | Homens   | 5 a 9 anos       |   2356474 | jovem                | 5 a 9 anos      |
+| Grande Região        | Nordeste    | 2010 | Homens   | 10 a 14 anos     |   2665839 | jovem                | 10 a 14 anos    |
+| Grande Região        | Nordeste    | 2010 | Homens   | 15 a 19 anos     |   2580749 | economicamente_ativa | 15 a 19 anos    |
+| Grande Região        | Nordeste    | 2010 | Homens   | 20 a 24 anos     |   2497122 | economicamente_ativa | 20 a 24 anos    |
+| Grande Região        | Nordeste    | 2010 | Homens   | 25 a 29 anos     |   2341069 | economicamente_ativa | 25 a 29 anos    |
+| Grande Região        | Nordeste    | 2010 | Homens   | 30 a 34 anos     |   2072044 | economicamente_ativa | 30 a 34 anos    |
+| Grande Região        | Nordeste    | 2010 | Homens   | 35 a 39 anos     |   1759523 | economicamente_ativa | 35 a 39 anos    |
+| Grande Região        | Nordeste    | 2010 | Homens   | 40 a 44 anos     |   1609419 | economicamente_ativa | 40 a 44 anos    |
+| Grande Região        | Nordeste    | 2010 | Homens   | 45 a 49 anos     |   1393291 | economicamente_ativa | 45 a 49 anos    |
+| Grande Região        | Nordeste    | 2010 | Homens   | 50 a 54 anos     |   1124879 | economicamente_ativa | 50 a 54 anos    |
+| Grande Região        | Nordeste    | 2010 | Homens   | 55 a 59 anos     |    914617 | economicamente_ativa | 55 a 59 anos    |
+| Grande Região        | Nordeste    | 2010 | Homens   | 60 a 64 anos     |    763608 | economicamente_ativa | 60 a 64 anos    |
+| Grande Região        | Nordeste    | 2010 | Homens   | 65 a 69 anos     |    580506 | idoso                | 65 a 69 anos    |
+| Grande Região        | Nordeste    | 2010 | Homens   | 70 a 74 anos     |    449022 | idoso                | 70 a 74 anos    |
+| Grande Região        | Nordeste    | 2010 | Homens   | 75 a 79 anos     |    285718 | idoso                | 75 a 79 anos    |
+| Grande Região        | Nordeste    | 2010 | Homens   | 80 a 84 anos     |    192810 | idoso                | 80 anos ou mais |
+| Grande Região        | Nordeste    | 2010 | Homens   | 85 a 89 anos     |    106353 | idoso                | 80 anos ou mais |
+| Grande Região        | Nordeste    | 2010 | Homens   | 90 a 94 anos     |     43499 | idoso                | 80 anos ou mais |
+| Grande Região        | Nordeste    | 2010 | Homens   | 95 a 99 anos     |     13368 | idoso                | 80 anos ou mais |
+| Grande Região        | Nordeste    | 2010 | Homens   | 100 anos ou mais |      3070 | idoso                | 80 anos ou mais |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 0 a 4 anos       |   2081406 | jovem                | 0 a 4 anos      |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 5 a 9 anos       |   2270963 | jovem                | 5 a 9 anos      |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 10 a 14 anos     |   2579337 | jovem                | 10 a 14 anos    |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 15 a 19 anos     |   2555119 | economicamente_ativa | 15 a 19 anos    |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 20 a 24 anos     |   2551003 | economicamente_ativa | 20 a 24 anos    |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 25 a 29 anos     |   2439128 | economicamente_ativa | 25 a 29 anos    |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 30 a 34 anos     |   2189846 | economicamente_ativa | 30 a 34 anos    |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 35 a 39 anos     |   1888622 | economicamente_ativa | 35 a 39 anos    |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 40 a 44 anos     |   1746386 | economicamente_ativa | 40 a 44 anos    |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 45 a 49 anos     |   1525052 | economicamente_ativa | 45 a 49 anos    |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 50 a 54 anos     |   1271726 | economicamente_ativa | 50 a 54 anos    |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 55 a 59 anos     |   1060143 | economicamente_ativa | 55 a 59 anos    |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 60 a 64 anos     |    879859 | economicamente_ativa | 60 a 64 anos    |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 65 a 69 anos     |    690356 | idoso                | 65 a 69 anos    |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 70 a 74 anos     |    554281 | idoso                | 70 a 74 anos    |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 75 a 79 anos     |    383075 | idoso                | 75 a 79 anos    |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 80 a 84 anos     |    266205 | idoso                | 80 anos ou mais |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 85 a 89 anos     |    144403 | idoso                | 80 anos ou mais |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 90 a 94 anos     |     65574 | idoso                | 80 anos ou mais |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 95 a 99 anos     |     23383 | idoso                | 80 anos ou mais |
+| Grande Região        | Nordeste    | 2010 | Mulheres | 100 anos ou mais |      7035 | idoso                | 80 anos ou mais |
+| Unidade da Federação | Pernambuco  | 1980 | Homens   | 0 a 4 anos       |    459647 | jovem                | 0 a 4 anos      |
+| Unidade da Federação | Pernambuco  | 1980 | Homens   | 5 a 9 anos       |    425980 | jovem                | 5 a 9 anos      |
+| Unidade da Federação | Pernambuco  | 1980 | Homens   | 10 a 14 anos     |    400711 | jovem                | 10 a 14 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Homens   | 15 a 19 anos     |    343967 | economicamente_ativa | 15 a 19 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Homens   | 20 a 24 anos     |    244802 | economicamente_ativa | 20 a 24 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Homens   | 25 a 29 anos     |    187862 | economicamente_ativa | 25 a 29 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Homens   | 30 a 34 anos     |    161516 | economicamente_ativa | 30 a 34 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Homens   | 35 a 39 anos     |    138914 | economicamente_ativa | 35 a 39 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Homens   | 40 a 44 anos     |    131362 | economicamente_ativa | 40 a 44 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Homens   | 45 a 49 anos     |     99879 | economicamente_ativa | 45 a 49 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Homens   | 50 a 54 anos     |     96834 | economicamente_ativa | 50 a 54 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Homens   | 55 a 59 anos     |     81135 | economicamente_ativa | 55 a 59 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Homens   | 60 a 64 anos     |     64458 | economicamente_ativa | 60 a 64 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Homens   | 65 a 69 anos     |     55573 | idoso                | 65 a 69 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Homens   | 70 a 74 anos     |     35853 | idoso                | 70 a 74 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Homens   | 75 a 79 anos     |     23625 | idoso                | 75 a 79 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Mulheres | 0 a 4 anos       |    453506 | jovem                | 0 a 4 anos      |
+| Unidade da Federação | Pernambuco  | 1980 | Mulheres | 5 a 9 anos       |    422831 | jovem                | 5 a 9 anos      |
+| Unidade da Federação | Pernambuco  | 1980 | Mulheres | 10 a 14 anos     |    405676 | jovem                | 10 a 14 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Mulheres | 15 a 19 anos     |    362827 | economicamente_ativa | 15 a 19 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Mulheres | 20 a 24 anos     |    277490 | economicamente_ativa | 20 a 24 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Mulheres | 25 a 29 anos     |    222461 | economicamente_ativa | 25 a 29 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Mulheres | 30 a 34 anos     |    186247 | economicamente_ativa | 30 a 34 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Mulheres | 35 a 39 anos     |    162016 | economicamente_ativa | 35 a 39 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Mulheres | 40 a 44 anos     |    151904 | economicamente_ativa | 40 a 44 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Mulheres | 45 a 49 anos     |    116342 | economicamente_ativa | 45 a 49 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Mulheres | 50 a 54 anos     |    108550 | economicamente_ativa | 50 a 54 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Mulheres | 55 a 59 anos     |     83631 | economicamente_ativa | 55 a 59 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Mulheres | 60 a 64 anos     |     68697 | economicamente_ativa | 60 a 64 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Mulheres | 65 a 69 anos     |     58776 | idoso                | 65 a 69 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Mulheres | 70 a 74 anos     |     41438 | idoso                | 70 a 74 anos    |
+| Unidade da Federação | Pernambuco  | 1980 | Mulheres | 75 a 79 anos     |     28254 | idoso                | 75 a 79 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Homens   | 0 a 4 anos       |    428390 | jovem                | 0 a 4 anos      |
+| Unidade da Federação | Pernambuco  | 1991 | Homens   | 5 a 9 anos       |    450020 | jovem                | 5 a 9 anos      |
+| Unidade da Federação | Pernambuco  | 1991 | Homens   | 10 a 14 anos     |    444647 | jovem                | 10 a 14 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Homens   | 15 a 19 anos     |    397918 | economicamente_ativa | 15 a 19 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Homens   | 20 a 24 anos     |    313733 | economicamente_ativa | 20 a 24 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Homens   | 25 a 29 anos     |    266447 | economicamente_ativa | 25 a 29 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Homens   | 30 a 34 anos     |    217510 | economicamente_ativa | 30 a 34 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Homens   | 35 a 39 anos     |    181043 | economicamente_ativa | 35 a 39 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Homens   | 40 a 44 anos     |    161048 | economicamente_ativa | 40 a 44 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Homens   | 45 a 49 anos     |    128068 | economicamente_ativa | 45 a 49 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Homens   | 50 a 54 anos     |    113547 | economicamente_ativa | 50 a 54 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Homens   | 55 a 59 anos     |     85374 | economicamente_ativa | 55 a 59 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Homens   | 60 a 64 anos     |     79002 | economicamente_ativa | 60 a 64 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Homens   | 65 a 69 anos     |     67977 | idoso                | 65 a 69 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Homens   | 70 a 74 anos     |     49018 | idoso                | 70 a 74 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Homens   | 75 a 79 anos     |     32638 | idoso                | 75 a 79 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Mulheres | 0 a 4 anos       |    421124 | jovem                | 0 a 4 anos      |
+| Unidade da Federação | Pernambuco  | 1991 | Mulheres | 5 a 9 anos       |    441690 | jovem                | 5 a 9 anos      |
+| Unidade da Federação | Pernambuco  | 1991 | Mulheres | 10 a 14 anos     |    443394 | jovem                | 10 a 14 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Mulheres | 15 a 19 anos     |    407349 | economicamente_ativa | 15 a 19 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Mulheres | 20 a 24 anos     |    339492 | economicamente_ativa | 20 a 24 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Mulheres | 25 a 29 anos     |    296579 | economicamente_ativa | 25 a 29 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Mulheres | 30 a 34 anos     |    244062 | economicamente_ativa | 30 a 34 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Mulheres | 35 a 39 anos     |    213771 | economicamente_ativa | 35 a 39 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Mulheres | 40 a 44 anos     |    184668 | economicamente_ativa | 40 a 44 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Mulheres | 45 a 49 anos     |    148690 | economicamente_ativa | 45 a 49 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Mulheres | 50 a 54 anos     |    134490 | economicamente_ativa | 50 a 54 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Mulheres | 55 a 59 anos     |    105733 | economicamente_ativa | 55 a 59 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Mulheres | 60 a 64 anos     |     95571 | economicamente_ativa | 60 a 64 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Mulheres | 65 a 69 anos     |     77711 | idoso                | 65 a 69 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Mulheres | 70 a 74 anos     |     55964 | idoso                | 70 a 74 anos    |
+| Unidade da Federação | Pernambuco  | 1991 | Mulheres | 75 a 79 anos     |     37977 | idoso                | 75 a 79 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 0 a 4 anos       |    404354 | jovem                | 0 a 4 anos      |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 5 a 9 anos       |    407068 | jovem                | 5 a 9 anos      |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 10 a 14 anos     |    436759 | jovem                | 10 a 14 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 15 a 19 anos     |    442466 | economicamente_ativa | 15 a 19 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 20 a 24 anos     |    380763 | economicamente_ativa | 20 a 24 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 25 a 29 anos     |    309715 | economicamente_ativa | 25 a 29 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 30 a 34 anos     |    273694 | economicamente_ativa | 30 a 34 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 35 a 39 anos     |    246284 | economicamente_ativa | 35 a 39 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 40 a 44 anos     |    202100 | economicamente_ativa | 40 a 44 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 45 a 49 anos     |    164910 | economicamente_ativa | 45 a 49 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 50 a 54 anos     |    143756 | economicamente_ativa | 50 a 54 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 55 a 59 anos     |    110620 | economicamente_ativa | 55 a 59 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 60 a 64 anos     |     96307 | economicamente_ativa | 60 a 64 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 65 a 69 anos     |     70137 | idoso                | 65 a 69 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 70 a 74 anos     |     59951 | idoso                | 70 a 74 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 75 a 79 anos     |     41822 | idoso                | 75 a 79 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 80 a 84 anos     |     24164 | idoso                | 80 anos ou mais |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 85 a 89 anos     |     11848 | idoso                | 80 anos ou mais |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 90 a 94 anos     |      3484 | idoso                | 80 anos ou mais |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 95 a 99 anos     |      1045 | idoso                | 80 anos ou mais |
+| Unidade da Federação | Pernambuco  | 2000 | Homens   | 100 anos ou mais |       134 | idoso                | 80 anos ou mais |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 0 a 4 anos       |    393754 | jovem                | 0 a 4 anos      |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 5 a 9 anos       |    397927 | jovem                | 5 a 9 anos      |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 10 a 14 anos     |    429324 | jovem                | 10 a 14 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 15 a 19 anos     |    438605 | economicamente_ativa | 15 a 19 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 20 a 24 anos     |    389475 | economicamente_ativa | 20 a 24 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 25 a 29 anos     |    333565 | economicamente_ativa | 25 a 29 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 30 a 34 anos     |    305178 | economicamente_ativa | 30 a 34 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 35 a 39 anos     |    277050 | economicamente_ativa | 35 a 39 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 40 a 44 anos     |    230618 | economicamente_ativa | 40 a 44 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 45 a 49 anos     |    197119 | economicamente_ativa | 45 a 49 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 50 a 54 anos     |    170812 | economicamente_ativa | 50 a 54 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 55 a 59 anos     |    136791 | economicamente_ativa | 55 a 59 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 60 a 64 anos     |    123468 | economicamente_ativa | 60 a 64 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 65 a 69 anos     |     93496 | idoso                | 65 a 69 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 70 a 74 anos     |     74076 | idoso                | 70 a 74 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 75 a 79 anos     |     49053 | idoso                | 75 a 79 anos    |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 80 a 84 anos     |     32061 | idoso                | 80 anos ou mais |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 85 a 89 anos     |     16015 | idoso                | 80 anos ou mais |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 90 a 94 anos     |      5900 | idoso                | 80 anos ou mais |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 95 a 99 anos     |      2142 | idoso                | 80 anos ou mais |
+| Unidade da Federação | Pernambuco  | 2000 | Mulheres | 100 anos ou mais |      1341 | idoso                | 80 anos ou mais |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 0 a 4 anos       |    345253 | jovem                | 0 a 4 anos      |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 5 a 9 anos       |    378382 | jovem                | 5 a 9 anos      |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 10 a 14 anos     |    423518 | jovem                | 10 a 14 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 15 a 19 anos     |    407321 | economicamente_ativa | 15 a 19 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 20 a 24 anos     |    402720 | economicamente_ativa | 20 a 24 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 25 a 29 anos     |    379007 | economicamente_ativa | 25 a 29 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 30 a 34 anos     |    345039 | economicamente_ativa | 30 a 34 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 35 a 39 anos     |    301392 | economicamente_ativa | 35 a 39 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 40 a 44 anos     |    271348 | economicamente_ativa | 40 a 44 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 45 a 49 anos     |    233884 | economicamente_ativa | 45 a 49 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 50 a 54 anos     |    189821 | economicamente_ativa | 50 a 54 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 55 a 59 anos     |    153700 | economicamente_ativa | 55 a 59 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 60 a 64 anos     |    128302 | economicamente_ativa | 60 a 64 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 65 a 69 anos     |     95894 | idoso                | 65 a 69 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 70 a 74 anos     |     73732 | idoso                | 70 a 74 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 75 a 79 anos     |     45511 | idoso                | 75 a 79 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 80 a 84 anos     |     31089 | idoso                | 80 anos ou mais |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 85 a 89 anos     |     16445 | idoso                | 80 anos ou mais |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 90 a 94 anos     |      6203 | idoso                | 80 anos ou mais |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 95 a 99 anos     |      1801 | idoso                | 80 anos ou mais |
+| Unidade da Federação | Pernambuco  | 2010 | Homens   | 100 anos ou mais |       319 | idoso                | 80 anos ou mais |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 0 a 4 anos       |    332602 | jovem                | 0 a 4 anos      |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 5 a 9 anos       |    366540 | jovem                | 5 a 9 anos      |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 10 a 14 anos     |    411581 | jovem                | 10 a 14 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 15 a 19 anos     |    406078 | economicamente_ativa | 15 a 19 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 20 a 24 anos     |    414830 | economicamente_ativa | 20 a 24 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 25 a 29 anos     |    401078 | economicamente_ativa | 25 a 29 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 30 a 34 anos     |    372477 | economicamente_ativa | 30 a 34 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 35 a 39 anos     |    333467 | economicamente_ativa | 35 a 39 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 40 a 44 anos     |    305918 | economicamente_ativa | 40 a 44 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 45 a 49 anos     |    268189 | economicamente_ativa | 45 a 49 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 50 a 54 anos     |    225006 | economicamente_ativa | 50 a 54 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 55 a 59 anos     |    190539 | economicamente_ativa | 55 a 59 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 60 a 64 anos     |    159365 | economicamente_ativa | 60 a 64 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 65 a 69 anos     |    124321 | idoso                | 65 a 69 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 70 a 74 anos     |     99982 | idoso                | 70 a 74 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 75 a 79 anos     |     66360 | idoso                | 75 a 79 anos    |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 80 a 84 anos     |     46670 | idoso                | 80 anos ou mais |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 85 a 89 anos     |     25120 | idoso                | 80 anos ou mais |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 90 a 94 anos     |     10827 | idoso                | 80 anos ou mais |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 95 a 99 anos     |      3529 | idoso                | 80 anos ou mais |
+| Unidade da Federação | Pernambuco  | 2010 | Mulheres | 100 anos ou mais |      1289 | idoso                | 80 anos ou mais |
+| Município            | Recife (PE) | 1980 | Homens   | 0 a 4 anos       |     75144 | jovem                | 0 a 4 anos      |
+| Município            | Recife (PE) | 1980 | Homens   | 5 a 9 anos       |     70156 | jovem                | 5 a 9 anos      |
+| Município            | Recife (PE) | 1980 | Homens   | 10 a 14 anos     |     67519 | jovem                | 10 a 14 anos    |
+| Município            | Recife (PE) | 1980 | Homens   | 15 a 19 anos     |     69044 | economicamente_ativa | 15 a 19 anos    |
+| Município            | Recife (PE) | 1980 | Homens   | 20 a 24 anos     |     60457 | economicamente_ativa | 20 a 24 anos    |
+| Município            | Recife (PE) | 1980 | Homens   | 25 a 29 anos     |     44383 | economicamente_ativa | 25 a 29 anos    |
+| Município            | Recife (PE) | 1980 | Homens   | 30 a 34 anos     |     34684 | economicamente_ativa | 30 a 34 anos    |
+| Município            | Recife (PE) | 1980 | Homens   | 35 a 39 anos     |     27598 | economicamente_ativa | 35 a 39 anos    |
+| Município            | Recife (PE) | 1980 | Homens   | 40 a 44 anos     |     25481 | economicamente_ativa | 40 a 44 anos    |
+| Município            | Recife (PE) | 1980 | Homens   | 45 a 49 anos     |     20110 | economicamente_ativa | 45 a 49 anos    |
+| Município            | Recife (PE) | 1980 | Homens   | 50 a 54 anos     |     19548 | economicamente_ativa | 50 a 54 anos    |
+| Município            | Recife (PE) | 1980 | Homens   | 55 a 59 anos     |     15617 | economicamente_ativa | 55 a 59 anos    |
+| Município            | Recife (PE) | 1980 | Homens   | 60 a 64 anos     |     11794 | economicamente_ativa | 60 a 64 anos    |
+| Município            | Recife (PE) | 1980 | Homens   | 65 a 69 anos     |      8245 | idoso                | 65 a 69 anos    |
+| Município            | Recife (PE) | 1980 | Homens   | 70 a 74 anos     |      5175 | idoso                | 70 a 74 anos    |
+| Município            | Recife (PE) | 1980 | Homens   | 75 a 79 anos     |      3209 | idoso                | 75 a 79 anos    |
+| Município            | Recife (PE) | 1980 | Mulheres | 0 a 4 anos       |     72377 | jovem                | 0 a 4 anos      |
+| Município            | Recife (PE) | 1980 | Mulheres | 5 a 9 anos       |     68898 | jovem                | 5 a 9 anos      |
+| Município            | Recife (PE) | 1980 | Mulheres | 10 a 14 anos     |     69805 | jovem                | 10 a 14 anos    |
+| Município            | Recife (PE) | 1980 | Mulheres | 15 a 19 anos     |     77633 | economicamente_ativa | 15 a 19 anos    |
+| Município            | Recife (PE) | 1980 | Mulheres | 20 a 24 anos     |     69230 | economicamente_ativa | 20 a 24 anos    |
+| Município            | Recife (PE) | 1980 | Mulheres | 25 a 29 anos     |     54981 | economicamente_ativa | 25 a 29 anos    |
+| Município            | Recife (PE) | 1980 | Mulheres | 30 a 34 anos     |     43806 | economicamente_ativa | 30 a 34 anos    |
+| Município            | Recife (PE) | 1980 | Mulheres | 35 a 39 anos     |     35642 | economicamente_ativa | 35 a 39 anos    |
+| Município            | Recife (PE) | 1980 | Mulheres | 40 a 44 anos     |     33397 | economicamente_ativa | 40 a 44 anos    |
+| Município            | Recife (PE) | 1980 | Mulheres | 45 a 49 anos     |     26575 | economicamente_ativa | 45 a 49 anos    |
+| Município            | Recife (PE) | 1980 | Mulheres | 50 a 54 anos     |     25361 | economicamente_ativa | 50 a 54 anos    |
+| Município            | Recife (PE) | 1980 | Mulheres | 55 a 59 anos     |     19181 | economicamente_ativa | 55 a 59 anos    |
+| Município            | Recife (PE) | 1980 | Mulheres | 60 a 64 anos     |     15503 | economicamente_ativa | 60 a 64 anos    |
+| Município            | Recife (PE) | 1980 | Mulheres | 65 a 69 anos     |     11390 | idoso                | 65 a 69 anos    |
+| Município            | Recife (PE) | 1980 | Mulheres | 70 a 74 anos     |      8729 | idoso                | 70 a 74 anos    |
+| Município            | Recife (PE) | 1980 | Mulheres | 75 a 79 anos     |      6020 | idoso                | 75 a 79 anos    |
+| Município            | Recife (PE) | 1991 | Homens   | 0 a 4 anos       |     64776 | jovem                | 0 a 4 anos      |
+| Município            | Recife (PE) | 1991 | Homens   | 5 a 9 anos       |     68982 | jovem                | 5 a 9 anos      |
+| Município            | Recife (PE) | 1991 | Homens   | 10 a 14 anos     |     69099 | jovem                | 10 a 14 anos    |
+| Município            | Recife (PE) | 1991 | Homens   | 15 a 19 anos     |     66768 | economicamente_ativa | 15 a 19 anos    |
+| Município            | Recife (PE) | 1991 | Homens   | 20 a 24 anos     |     62044 | economicamente_ativa | 20 a 24 anos    |
+| Município            | Recife (PE) | 1991 | Homens   | 25 a 29 anos     |     55033 | economicamente_ativa | 25 a 29 anos    |
+| Município            | Recife (PE) | 1991 | Homens   | 30 a 34 anos     |     47272 | economicamente_ativa | 30 a 34 anos    |
+| Município            | Recife (PE) | 1991 | Homens   | 35 a 39 anos     |     37601 | economicamente_ativa | 35 a 39 anos    |
+| Município            | Recife (PE) | 1991 | Homens   | 40 a 44 anos     |     31349 | economicamente_ativa | 40 a 44 anos    |
+| Município            | Recife (PE) | 1991 | Homens   | 45 a 49 anos     |     23670 | economicamente_ativa | 45 a 49 anos    |
+| Município            | Recife (PE) | 1991 | Homens   | 50 a 54 anos     |     20532 | economicamente_ativa | 50 a 54 anos    |
+| Município            | Recife (PE) | 1991 | Homens   | 55 a 59 anos     |     15894 | economicamente_ativa | 55 a 59 anos    |
+| Município            | Recife (PE) | 1991 | Homens   | 60 a 64 anos     |     14120 | economicamente_ativa | 60 a 64 anos    |
+| Município            | Recife (PE) | 1991 | Homens   | 65 a 69 anos     |     11252 | idoso                | 65 a 69 anos    |
+| Município            | Recife (PE) | 1991 | Homens   | 70 a 74 anos     |      7273 | idoso                | 70 a 74 anos    |
+| Município            | Recife (PE) | 1991 | Homens   | 75 a 79 anos     |      4380 | idoso                | 75 a 79 anos    |
+| Município            | Recife (PE) | 1991 | Mulheres | 0 a 4 anos       |     63320 | jovem                | 0 a 4 anos      |
+| Município            | Recife (PE) | 1991 | Mulheres | 5 a 9 anos       |     67054 | jovem                | 5 a 9 anos      |
+| Município            | Recife (PE) | 1991 | Mulheres | 10 a 14 anos     |     69846 | jovem                | 10 a 14 anos    |
+| Município            | Recife (PE) | 1991 | Mulheres | 15 a 19 anos     |     72646 | economicamente_ativa | 15 a 19 anos    |
+| Município            | Recife (PE) | 1991 | Mulheres | 20 a 24 anos     |     69251 | economicamente_ativa | 20 a 24 anos    |
+| Município            | Recife (PE) | 1991 | Mulheres | 25 a 29 anos     |     64635 | economicamente_ativa | 25 a 29 anos    |
+| Município            | Recife (PE) | 1991 | Mulheres | 30 a 34 anos     |     55582 | economicamente_ativa | 30 a 34 anos    |
+| Município            | Recife (PE) | 1991 | Mulheres | 35 a 39 anos     |     47572 | economicamente_ativa | 35 a 39 anos    |
+| Município            | Recife (PE) | 1991 | Mulheres | 40 a 44 anos     |     39935 | economicamente_ativa | 40 a 44 anos    |
+| Município            | Recife (PE) | 1991 | Mulheres | 45 a 49 anos     |     31082 | economicamente_ativa | 45 a 49 anos    |
+| Município            | Recife (PE) | 1991 | Mulheres | 50 a 54 anos     |     27965 | economicamente_ativa | 50 a 54 anos    |
+| Município            | Recife (PE) | 1991 | Mulheres | 55 a 59 anos     |     22310 | economicamente_ativa | 55 a 59 anos    |
+| Município            | Recife (PE) | 1991 | Mulheres | 60 a 64 anos     |     21121 | economicamente_ativa | 60 a 64 anos    |
+| Município            | Recife (PE) | 1991 | Mulheres | 65 a 69 anos     |     16084 | idoso                | 65 a 69 anos    |
+| Município            | Recife (PE) | 1991 | Mulheres | 70 a 74 anos     |     11388 | idoso                | 70 a 74 anos    |
+| Município            | Recife (PE) | 1991 | Mulheres | 75 a 79 anos     |      7372 | idoso                | 75 a 79 anos    |
+| Município            | Recife (PE) | 2000 | Homens   | 0 a 4 anos       |     60330 | jovem                | 0 a 4 anos      |
+| Município            | Recife (PE) | 2000 | Homens   | 5 a 9 anos       |     61881 | jovem                | 5 a 9 anos      |
+| Município            | Recife (PE) | 2000 | Homens   | 10 a 14 anos     |     66818 | jovem                | 10 a 14 anos    |
+| Município            | Recife (PE) | 2000 | Homens   | 15 a 19 anos     |     71569 | economicamente_ativa | 15 a 19 anos    |
+| Município            | Recife (PE) | 2000 | Homens   | 20 a 24 anos     |     67195 | economicamente_ativa | 20 a 24 anos    |
+| Município            | Recife (PE) | 2000 | Homens   | 25 a 29 anos     |     58974 | economicamente_ativa | 25 a 29 anos    |
+| Município            | Recife (PE) | 2000 | Homens   | 30 a 34 anos     |     53315 | economicamente_ativa | 30 a 34 anos    |
+| Município            | Recife (PE) | 2000 | Homens   | 35 a 39 anos     |     50128 | economicamente_ativa | 35 a 39 anos    |
+| Município            | Recife (PE) | 2000 | Homens   | 40 a 44 anos     |     42531 | economicamente_ativa | 40 a 44 anos    |
+| Município            | Recife (PE) | 2000 | Homens   | 45 a 49 anos     |     33330 | economicamente_ativa | 45 a 49 anos    |
+| Município            | Recife (PE) | 2000 | Homens   | 50 a 54 anos     |     27199 | economicamente_ativa | 50 a 54 anos    |
+| Município            | Recife (PE) | 2000 | Homens   | 55 a 59 anos     |     19179 | economicamente_ativa | 55 a 59 anos    |
+| Município            | Recife (PE) | 2000 | Homens   | 60 a 64 anos     |     15970 | economicamente_ativa | 60 a 64 anos    |
+| Município            | Recife (PE) | 2000 | Homens   | 65 a 69 anos     |     11869 | idoso                | 65 a 69 anos    |
+| Município            | Recife (PE) | 2000 | Homens   | 70 a 74 anos     |     10026 | idoso                | 70 a 74 anos    |
+| Município            | Recife (PE) | 2000 | Homens   | 75 a 79 anos     |      6063 | idoso                | 75 a 79 anos    |
+| Município            | Recife (PE) | 2000 | Homens   | 80 a 84 anos     |      3242 | idoso                | 80 anos ou mais |
+| Município            | Recife (PE) | 2000 | Homens   | 85 a 89 anos     |      1445 | idoso                | 80 anos ou mais |
+| Município            | Recife (PE) | 2000 | Homens   | 90 a 94 anos     |       465 | idoso                | 80 anos ou mais |
+| Município            | Recife (PE) | 2000 | Homens   | 95 a 99 anos     |       149 | idoso                | 80 anos ou mais |
+| Município            | Recife (PE) | 2000 | Homens   | 100 anos ou mais |        10 | idoso                | 80 anos ou mais |
+| Município            | Recife (PE) | 2000 | Mulheres | 0 a 4 anos       |     57711 | jovem                | 0 a 4 anos      |
+| Município            | Recife (PE) | 2000 | Mulheres | 5 a 9 anos       |     59539 | jovem                | 5 a 9 anos      |
+| Município            | Recife (PE) | 2000 | Mulheres | 10 a 14 anos     |     65961 | jovem                | 10 a 14 anos    |
+| Município            | Recife (PE) | 2000 | Mulheres | 15 a 19 anos     |     73960 | economicamente_ativa | 15 a 19 anos    |
+| Município            | Recife (PE) | 2000 | Mulheres | 20 a 24 anos     |     72349 | economicamente_ativa | 20 a 24 anos    |
+| Município            | Recife (PE) | 2000 | Mulheres | 25 a 29 anos     |     66762 | economicamente_ativa | 25 a 29 anos    |
+| Município            | Recife (PE) | 2000 | Mulheres | 30 a 34 anos     |     62232 | economicamente_ativa | 30 a 34 anos    |
+| Município            | Recife (PE) | 2000 | Mulheres | 35 a 39 anos     |     59660 | economicamente_ativa | 35 a 39 anos    |
+| Município            | Recife (PE) | 2000 | Mulheres | 40 a 44 anos     |     51674 | economicamente_ativa | 40 a 44 anos    |
+| Município            | Recife (PE) | 2000 | Mulheres | 45 a 49 anos     |     43544 | economicamente_ativa | 45 a 49 anos    |
+| Município            | Recife (PE) | 2000 | Mulheres | 50 a 54 anos     |     36643 | economicamente_ativa | 50 a 54 anos    |
+| Município            | Recife (PE) | 2000 | Mulheres | 55 a 59 anos     |     27022 | economicamente_ativa | 55 a 59 anos    |
+| Município            | Recife (PE) | 2000 | Mulheres | 60 a 64 anos     |     24605 | economicamente_ativa | 60 a 64 anos    |
+| Município            | Recife (PE) | 2000 | Mulheres | 65 a 69 anos     |     20154 | idoso                | 65 a 69 anos    |
+| Município            | Recife (PE) | 2000 | Mulheres | 70 a 74 anos     |     16311 | idoso                | 70 a 74 anos    |
+| Município            | Recife (PE) | 2000 | Mulheres | 75 a 79 anos     |     10890 | idoso                | 75 a 79 anos    |
+| Município            | Recife (PE) | 2000 | Mulheres | 80 a 84 anos     |      6727 | idoso                | 80 anos ou mais |
+| Município            | Recife (PE) | 2000 | Mulheres | 85 a 89 anos     |      3212 | idoso                | 80 anos ou mais |
+| Município            | Recife (PE) | 2000 | Mulheres | 90 a 94 anos     |      1429 | idoso                | 80 anos ou mais |
+| Município            | Recife (PE) | 2000 | Mulheres | 95 a 99 anos     |       586 | idoso                | 80 anos ou mais |
+| Município            | Recife (PE) | 2000 | Mulheres | 100 anos ou mais |       245 | idoso                | 80 anos ou mais |
+| Município            | Recife (PE) | 2010 | Homens   | 0 a 4 anos       |     48897 | jovem                | 0 a 4 anos      |
+| Município            | Recife (PE) | 2010 | Homens   | 5 a 9 anos       |     53570 | jovem                | 5 a 9 anos      |
+| Município            | Recife (PE) | 2010 | Homens   | 10 a 14 anos     |     60882 | jovem                | 10 a 14 anos    |
+| Município            | Recife (PE) | 2010 | Homens   | 15 a 19 anos     |     62620 | economicamente_ativa | 15 a 19 anos    |
+| Município            | Recife (PE) | 2010 | Homens   | 20 a 24 anos     |     67534 | economicamente_ativa | 20 a 24 anos    |
+| Município            | Recife (PE) | 2010 | Homens   | 25 a 29 anos     |     66963 | economicamente_ativa | 25 a 29 anos    |
+| Município            | Recife (PE) | 2010 | Homens   | 30 a 34 anos     |     60573 | economicamente_ativa | 30 a 34 anos    |
+| Município            | Recife (PE) | 2010 | Homens   | 35 a 39 anos     |     54799 | economicamente_ativa | 35 a 39 anos    |
+| Município            | Recife (PE) | 2010 | Homens   | 40 a 44 anos     |     51214 | economicamente_ativa | 40 a 44 anos    |
+| Município            | Recife (PE) | 2010 | Homens   | 45 a 49 anos     |     46608 | economicamente_ativa | 45 a 49 anos    |
+| Município            | Recife (PE) | 2010 | Homens   | 50 a 54 anos     |     39137 | economicamente_ativa | 50 a 54 anos    |
+| Município            | Recife (PE) | 2010 | Homens   | 55 a 59 anos     |     30110 | economicamente_ativa | 55 a 59 anos    |
+| Município            | Recife (PE) | 2010 | Homens   | 60 a 64 anos     |     22596 | economicamente_ativa | 60 a 64 anos    |
+| Município            | Recife (PE) | 2010 | Homens   | 65 a 69 anos     |     15626 | idoso                | 65 a 69 anos    |
+| Município            | Recife (PE) | 2010 | Homens   | 70 a 74 anos     |     11317 | idoso                | 70 a 74 anos    |
+| Município            | Recife (PE) | 2010 | Homens   | 75 a 79 anos     |      7943 | idoso                | 75 a 79 anos    |
+| Município            | Recife (PE) | 2010 | Homens   | 80 a 84 anos     |      5677 | idoso                | 80 anos ou mais |
+| Município            | Recife (PE) | 2010 | Homens   | 85 a 89 anos     |      2691 | idoso                | 80 anos ou mais |
+| Município            | Recife (PE) | 2010 | Homens   | 90 a 94 anos     |       824 | idoso                | 80 anos ou mais |
+| Município            | Recife (PE) | 2010 | Homens   | 95 a 99 anos     |       182 | idoso                | 80 anos ou mais |
+| Município            | Recife (PE) | 2010 | Homens   | 100 anos ou mais |        56 | idoso                | 80 anos ou mais |
+| Município            | Recife (PE) | 2010 | Mulheres | 0 a 4 anos       |     47632 | jovem                | 0 a 4 anos      |
+| Município            | Recife (PE) | 2010 | Mulheres | 5 a 9 anos       |     51407 | jovem                | 5 a 9 anos      |
+| Município            | Recife (PE) | 2010 | Mulheres | 10 a 14 anos     |     59217 | jovem                | 10 a 14 anos    |
+| Município            | Recife (PE) | 2010 | Mulheres | 15 a 19 anos     |     62954 | economicamente_ativa | 15 a 19 anos    |
+| Município            | Recife (PE) | 2010 | Mulheres | 20 a 24 anos     |     72360 | economicamente_ativa | 20 a 24 anos    |
+| Município            | Recife (PE) | 2010 | Mulheres | 25 a 29 anos     |     74189 | economicamente_ativa | 25 a 29 anos    |
+| Município            | Recife (PE) | 2010 | Mulheres | 30 a 34 anos     |     69801 | economicamente_ativa | 30 a 34 anos    |
+| Município            | Recife (PE) | 2010 | Mulheres | 35 a 39 anos     |     64814 | economicamente_ativa | 35 a 39 anos    |
+| Município            | Recife (PE) | 2010 | Mulheres | 40 a 44 anos     |     61179 | economicamente_ativa | 40 a 44 anos    |
+| Município            | Recife (PE) | 2010 | Mulheres | 45 a 49 anos     |     57606 | economicamente_ativa | 45 a 49 anos    |
+| Município            | Recife (PE) | 2010 | Mulheres | 50 a 54 anos     |     50648 | economicamente_ativa | 50 a 54 anos    |
+| Município            | Recife (PE) | 2010 | Mulheres | 55 a 59 anos     |     40949 | economicamente_ativa | 55 a 59 anos    |
+| Município            | Recife (PE) | 2010 | Mulheres | 60 a 64 anos     |     33669 | economicamente_ativa | 60 a 64 anos    |
+| Município            | Recife (PE) | 2010 | Mulheres | 65 a 69 anos     |     25609 | idoso                | 65 a 69 anos    |
+| Município            | Recife (PE) | 2010 | Mulheres | 70 a 74 anos     |     20951 | idoso                | 70 a 74 anos    |
+| Município            | Recife (PE) | 2010 | Mulheres | 75 a 79 anos     |     14713 | idoso                | 75 a 79 anos    |
+| Município            | Recife (PE) | 2010 | Mulheres | 80 a 84 anos     |     10784 | idoso                | 80 anos ou mais |
+| Município            | Recife (PE) | 2010 | Mulheres | 85 a 89 anos     |      5929 | idoso                | 80 anos ou mais |
+| Município            | Recife (PE) | 2010 | Mulheres | 90 a 94 anos     |      2470 | idoso                | 80 anos ou mais |
+| Município            | Recife (PE) | 2010 | Mulheres | 95 a 99 anos     |       650 | idoso                | 80 anos ou mais |
+| Município            | Recife (PE) | 2010 | Mulheres | 100 anos ou mais |       352 | idoso                | 80 anos ou mais |
+
+**** Pirâmides etárias para Recife (PE) nos anos de 1991, 2000 e 2010
+
+#+begin_src R :results none :session
+q02a <- q02_sidra %>% 
+  filter( nivel_territorial == 'Município', ano >= 1991 )
+
+q02a_graf <- q02a %>%   # https://www.statology.org/population-pyramid-in-r/
+  ggplot( aes(x = idade_80m, fill = sexo,
+              y = ifelse(test = sexo == "Homens",
+                         yes = -populacao, no = populacao))) + 
+  geom_bar(stat = "identity") +
+  scale_y_continuous(labels = abs, limits = max(q02a$populacao) * c(-1,1)) +
+  labs(y = "População") + 
+  coord_flip() +
+  labs(
+    x = 'idade'
+   ,title = 'Pirâmides etárias para Recife (PE)'
+   ,subtitle = 'Dados proveninentes do SIDRA/IBGE'
+   ,caption = paste0('Fonte: ', url_API)
+   ,fill = ''
+  )+ 
+  facet_grid(~ ano ) +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+q02a_graf %>% ggsave( filename = 'img/q02a.png', width = 10, height = 4)
+
+#+end_src
+
+#+CAPTION: Pirâmide etária para Recife (PE)
+#+ATTR_ORG: :width 600
+[[./img/q02a.png]]
+
+**** Razão de sexos por grupo etário quinquenal
+
+#+begin_src R :colnames yes :session
+q02b <- q02_sidra %>% 
+  filter( ano == 2010 ) %>%
+  pivot_wider(
+    id_cols = c(local,idade)
+   ,names_from = sexo
+   ,values_from = populacao
+  ) %>%
+  mutate(
+    razao_F_div_M = Mulheres / Homens
+  )
+
+q02b_graf <- q02b %>%
+  ggplot( aes( x = idade, y = razao_F_div_M, group = local, colour=local) ) +
+  geom_line() +
+  labs(
+    x = 'faixa de idade'
+   ,y = 'razão de sexos (mulheres / homens)'
+   ,title = 'Razão de sexos'
+   ,subtitle = 'Ano de 2010'
+  ) + 
+  coord_flip()
+
+q02b_graf %>% ggsave( filename = 'img/q02b.png', width = 9, height =5)
+
+q02b
+#+end_src
+
+#+RESULTS:
+| local       | idade            |  Homens | Mulheres |     razao_F_div_M |
+|-------------+------------------+---------+----------+-------------------|
+| Nordeste    | 0 a 4 anos       | 2156068 |  2081406 | 0.965371222057931 |
+| Nordeste    | 5 a 9 anos       | 2356474 |  2270963 | 0.963712309153422 |
+| Nordeste    | 10 a 14 anos     | 2665839 |  2579337 | 0.967551678852324 |
+| Nordeste    | 15 a 19 anos     | 2580749 |  2555119 | 0.990068774607682 |
+| Nordeste    | 20 a 24 anos     | 2497122 |  2551003 |  1.02157723971836 |
+| Nordeste    | 25 a 29 anos     | 2341069 |  2439128 |  1.04188642026356 |
+| Nordeste    | 30 a 34 anos     | 2072044 |  2189846 |  1.05685303980031 |
+| Nordeste    | 35 a 39 anos     | 1759523 |  1888622 |  1.07337158991386 |
+| Nordeste    | 40 a 44 anos     | 1609419 |  1746386 |  1.08510338202792 |
+| Nordeste    | 45 a 49 anos     | 1393291 |  1525052 |  1.09456818424866 |
+| Nordeste    | 50 a 54 anos     | 1124879 |  1271726 |   1.1305447074752 |
+| Nordeste    | 55 a 59 anos     |  914617 |  1060143 |  1.15911140947522 |
+| Nordeste    | 60 a 64 anos     |  763608 |   879859 |  1.15223910697635 |
+| Nordeste    | 65 a 69 anos     |  580506 |   690356 |  1.18923146358522 |
+| Nordeste    | 70 a 74 anos     |  449022 |   554281 |  1.23441835812054 |
+| Nordeste    | 75 a 79 anos     |  285718 |   383075 |  1.34074507031409 |
+| Nordeste    | 80 a 84 anos     |  192810 |   266205 |  1.38065971681967 |
+| Nordeste    | 85 a 89 anos     |  106353 |   144403 |  1.35777081981702 |
+| Nordeste    | 90 a 94 anos     |   43499 |    65574 |  1.50748293064208 |
+| Nordeste    | 95 a 99 anos     |   13368 |    23383 |  1.74917713943746 |
+| Nordeste    | 100 anos ou mais |    3070 |     7035 |  2.29153094462541 |
+| Pernambuco  | 0 a 4 anos       |  345253 |   332602 | 0.963357306091475 |
+| Pernambuco  | 5 a 9 anos       |  378382 |   366540 | 0.968703585265684 |
+| Pernambuco  | 10 a 14 anos     |  423518 |   411581 | 0.971814657228264 |
+| Pernambuco  | 15 a 19 anos     |  407321 |   406078 | 0.996948352773365 |
+| Pernambuco  | 20 a 24 anos     |  402720 |   414830 |  1.03007052046087 |
+| Pernambuco  | 25 a 29 anos     |  379007 |   401078 |   1.0582337529386 |
+| Pernambuco  | 30 a 34 anos     |  345039 |   372477 |  1.07952144540182 |
+| Pernambuco  | 35 a 39 anos     |  301392 |   333467 |  1.10642286457504 |
+| Pernambuco  | 40 a 44 anos     |  271348 |   305918 |  1.12740097586863 |
+| Pernambuco  | 45 a 49 anos     |  233884 |   268189 |  1.14667527492261 |
+| Pernambuco  | 50 a 54 anos     |  189821 |   225006 |  1.18535883806323 |
+| Pernambuco  | 55 a 59 anos     |  153700 |   190539 |  1.23968119713728 |
+| Pernambuco  | 60 a 64 anos     |  128302 |   159365 |  1.24210846284547 |
+| Pernambuco  | 65 a 69 anos     |   95894 |   124321 |    1.296441904603 |
+| Pernambuco  | 70 a 74 anos     |   73732 |    99982 |  1.35601909618619 |
+| Pernambuco  | 75 a 79 anos     |   45511 |    66360 |   1.4581090285865 |
+| Pernambuco  | 80 a 84 anos     |   31089 |    46670 |   1.5011740486989 |
+| Pernambuco  | 85 a 89 anos     |   16445 |    25120 |  1.52751596229857 |
+| Pernambuco  | 90 a 94 anos     |    6203 |    10827 |  1.74544575205546 |
+| Pernambuco  | 95 a 99 anos     |    1801 |     3529 |  1.95946696279845 |
+| Pernambuco  | 100 anos ou mais |     319 |     1289 |  4.04075235109718 |
+| Recife (PE) | 0 a 4 anos       |   48897 |    47632 | 0.974129292185615 |
+| Recife (PE) | 5 a 9 anos       |   53570 |    51407 | 0.959622923277954 |
+| Recife (PE) | 10 a 14 anos     |   60882 |    59217 | 0.972652015374002 |
+| Recife (PE) | 15 a 19 anos     |   62620 |    62954 |  1.00533375918237 |
+| Recife (PE) | 20 a 24 anos     |   67534 |    72360 |  1.07146030147777 |
+| Recife (PE) | 25 a 29 anos     |   66963 |    74189 |  1.10791033854517 |
+| Recife (PE) | 30 a 34 anos     |   60573 |    69801 |  1.15234510425437 |
+| Recife (PE) | 35 a 39 anos     |   54799 |    64814 |  1.18275880946733 |
+| Recife (PE) | 40 a 44 anos     |   51214 |    61179 |   1.1945757019565 |
+| Recife (PE) | 45 a 49 anos     |   46608 |    57606 |  1.23596807415036 |
+| Recife (PE) | 50 a 54 anos     |   39137 |    50648 |  1.29412065309043 |
+| Recife (PE) | 55 a 59 anos     |   30110 |    40949 |  1.35998007306543 |
+| Recife (PE) | 60 a 64 anos     |   22596 |    33669 |  1.49004248539565 |
+| Recife (PE) | 65 a 69 anos     |   15626 |    25609 |  1.63887111224882 |
+| Recife (PE) | 70 a 74 anos     |   11317 |    20951 |  1.85128567641601 |
+| Recife (PE) | 75 a 79 anos     |    7943 |    14713 |  1.85232279994964 |
+| Recife (PE) | 80 a 84 anos     |    5677 |    10784 |  1.89959485643826 |
+| Recife (PE) | 85 a 89 anos     |    2691 |     5929 |   2.2032701597919 |
+| Recife (PE) | 90 a 94 anos     |     824 |     2470 |  2.99757281553398 |
+| Recife (PE) | 95 a 99 anos     |     182 |      650 |  3.57142857142857 |
+| Recife (PE) | 100 anos ou mais |      56 |      352 |  6.28571428571429 |
+
+#+CAPTION: Razão de sexos Recife (PE)
+#+ATTR_ORG: :width 600
+[[./img/q02b.png]]
+
+**** Razão de dependências
+
+Racional dos cálculos:
+
+- Razão de dependência de jovens (RDJ) = [população abaixo de 15 anos] / [população economicamente ativa]
+- Razão de dependência de idosos (RDI) = [população acima de 65 anos] / [população economicamente ativa]
+- Razão de dependência total (RDT) = ( [população abaixo de 15 anos] + [população acima de 65 anos]) / [população economicamente ativa]
+- Índice de envelhecimento = [população acima de 65 anos] / [população abaixo de 15 anos]
+
+#+begin_src R :colnames yes :session
+q02_sidra %>% 
+  ## filter( nivel_territorial == 'Município', ano %in% c(1991,2010) ) %>%
+  group_by( local,  ano, populacao_tipo ) %>%
+  summarise( sum_populacao = sum(populacao) ) %>%
+  pivot_wider(
+    id_cols = c(local, ano)
+   ,names_from = populacao_tipo
+   ,values_from = sum_populacao
+   ,values_fill = 0
+    ,values_fn = sum
+  ) %>% 
+  transmute(
+    local
+   ,ano
+   ,RDI = 100 * ( idoso / economicamente_ativa )
+   ,RDJ = 100 * ( jovem / economicamente_ativa )
+   ,RDT = 100 * ( (idoso + jovem) / economicamente_ativa )
+   ,indice_envelhecimento = 100 * ( idoso / jovem )
+  ) 
+#+end_src
+
+#+RESULTS:
+| local       |  ano |              RDI |              RDJ |              RDT | indice_envelhecimento |
+|-------------+------+------------------+------------------+------------------+-----------------------|
+| Nordeste    | 1980 | 7.39303712027996 | 83.2451121020515 | 90.6381492223314 |      8.88104650663059 |
+| Nordeste    | 1991 | 7.51277657582429 | 70.9515166773624 | 78.4642932531867 |      10.5886060335921 |
+| Nordeste    | 2000 | 9.54451937284087 | 53.9702610909044 | 63.5147804637453 |      17.6847752445826 |
+| Nordeste    | 2010 | 10.8313733062728 | 40.1274201256683 | 50.9587934319411 |       26.992448735433 |
+| Pernambuco  | 1980 | 7.39978255148905 | 78.0441727992454 | 85.4439553507345 |      9.48153114585974 |
+| Pernambuco  | 1991 | 7.80937241361709 | 63.9087089627245 | 71.7180813763416 |      12.2195746720091 |
+| Pernambuco  | 2000 | 9.78564316300498 | 49.6488847637462 | 59.4345279267512 |       19.709693801925 |
+| Pernambuco  | 2010 | 11.0212088297763 | 38.3374358453657 |  49.358644675142 |      28.7479028963504 |
+| Recife (PE) | 1980 | 5.85842950583884 |  58.066367590151 | 63.9247970959899 |      10.0891957754088 |
+| Recife (PE) | 1991 | 6.98817254006017 | 48.7761108058985 | 55.7642833459587 |       14.327039250565 |
+| Recife (PE) | 2000 | 9.69085683323224 | 38.8623999181493 | 48.5532567513815 |      24.9363313990974 |
+| Recife (PE) | 2010 | 11.5354807703772 | 29.4963052233146 | 41.0317859936918 |      39.1082228199188 |
+
+**** Taxas médias de crescimento anual
+
+***** Nordeste
+
+#+begin_src R :colnames yes :session
+q02e <- q02_sidra %>% 
+    filter( nivel_territorial == 'Grande Região' ) %>%
+    group_by( local,  ano ) %>%
+    summarise(
+        populacao = sum(populacao)
+       ,linear = 0
+       ,geometrica = 0
+       ,exponencial = 0
+    ) %>%
+    as.data.frame()
+q02e[1,'linear'] <- ''
+q02e[1,'geometrica'] <- ''
+q02e[1,'exponencial'] <- ''
+
+for( i in 2:nrow(q02e) ) {
+    ## Variáveis de apoio
+    B <- q02e[i,'populacao']               # população no final do período (T[n])
+    A <- q02e[i-1,'populacao']             # população no início do período (T[0])
+    n <- q02e[i,'ano'] - q02e[i-1,'ano']   # período em anos (n)
+    ## taxa média de crescimento linear :     B = A + A*n*i  ==> i = (B-A)/(A*n)
+    q02e[i,'linear']      <- 100 * ( (B-A)/(A*n) )
+    ## taxa média de crescimento geométrica:  B = A*(1+i)^n  ==> i = exp( ln(B/A)/n ) - 1
+    q02e[i,'geometrica']  <- 100 * ( exp( log(B/A) / n ) - 1 )
+    ## taxa média de crescimento exponencial: B = A*exp(i*n) ==> i = ln(B/A)/n
+    q02e[i,'exponencial'] <- 100 * ( log(B/A) / n )
+}
+q02e
+#+end_src
+
+#+RESULTS:
+| local    |  ano | populacao |           linear |       geometrica |      exponencial |
+|----------+------+-----------+------------------+------------------+------------------|
+| Nordeste | 1980 |  34582845 |                  |                  |                  |
+| Nordeste | 1991 |  42120061 | 1.98133338811614 | 1.80858197433211 | 1.79242168769787 |
+| Nordeste | 2000 |  47782487 | 1.49372633730147 | 1.41136768510652 | 1.40150062336228 |
+| Nordeste | 2010 |  53081950 | 1.10908061357292 | 1.05732816478274 | 1.05177754179527 |
+
+***** Pernambuco
+
+#+begin_src R :colnames yes :session
+q02e <- q02_sidra %>% 
+    filter( nivel_territorial == 'Unidade da Federação' ) %>%
+    group_by( local,  ano ) %>%
+    summarise(
+        populacao = sum(populacao)
+       ,linear = 0
+       ,geometrica = 0
+       ,exponencial = 0
+    ) %>%
+    as.data.frame()
+q02e[1,'linear'] <- ''
+q02e[1,'geometrica'] <- ''
+q02e[1,'exponencial'] <- ''
+
+for( i in 2:nrow(q02e) ) {
+    ## Variáveis de apoio
+    B <- q02e[i,'populacao']               # população no final do período (T[n])
+    A <- q02e[i-1,'populacao']             # população no início do período (T[0])
+    n <- q02e[i,'ano'] - q02e[i-1,'ano']   # período em anos (n)
+    ## taxa média de crescimento linear :     B = A + A*n*i  ==> i = (B-A)/(A*n)
+    q02e[i,'linear']      <- 100 * ( (B-A)/(A*n) )
+    ## taxa média de crescimento geométrica:  B = A*(1+i)^n  ==> i = exp( ln(B/A)/n ) - 1
+    q02e[i,'geometrica']  <- 100 * ( exp( log(B/A) / n ) - 1 )
+    ## taxa média de crescimento exponencial: B = A*exp(i*n) ==> i = ln(B/A)/n
+    q02e[i,'exponencial'] <- 100 * ( log(B/A) / n )
+}
+q02e
+#+end_src
+
+#+RESULTS:
+| local      |  ano | populacao |           linear |       geometrica |      exponencial |
+|------------+------+-----------+------------------+------------------+------------------|
+| Pernambuco | 1980 |   6102764 |                  |                  |                  |
+| Pernambuco | 1991 |   7064645 | 1.43285447827783 | 1.33944566443656 | 1.33055439878391 |
+| Pernambuco | 2000 |   7929151 |  1.3596751460579 | 1.29096414532632 | 1.28270223278291 |
+| Pernambuco | 2010 |   8796449 |  1.0938094128867 | 1.04342762445382 | 1.03802149195118 |
+
+***** Recife
+
+#+begin_src R :colnames yes :session
+q02e <- q02_sidra %>% 
+    filter( nivel_territorial == 'Município' ) %>%
+    group_by( local,  ano ) %>%
+    summarise(
+        populacao = sum(populacao)
+       ,linear = 0
+       ,geometrica = 0
+       ,exponencial = 0
+    ) %>%
+    as.data.frame()
+q02e[1,'linear'] <- ''
+q02e[1,'geometrica'] <- ''
+q02e[1,'exponencial'] <- ''
+
+for( i in 2:nrow(q02e) ) {
+    ## Variáveis de apoio
+    B <- q02e[i,'populacao']               # população no final do período (T[n])
+    A <- q02e[i-1,'populacao']             # população no início do período (T[0])
+    n <- q02e[i,'ano'] - q02e[i-1,'ano']   # período em anos (n)
+    ## taxa média de crescimento linear :     B = A + A*n*i  ==> i = (B-A)/(A*n)
+    q02e[i,'linear']      <- 100 * ( (B-A)/(A*n) )
+    ## taxa média de crescimento geométrica:  B = A*(1+i)^n  ==> i = exp( ln(B/A)/n ) - 1
+    q02e[i,'geometrica']  <- 100 * ( exp( log(B/A) / n ) - 1 )
+    ## taxa média de crescimento exponencial: B = A*exp(i*n) ==> i = ln(B/A)/n
+    q02e[i,'exponencial'] <- 100 * ( log(B/A) / n )
+}
+q02e
+#+end_src
+
+#+RESULTS:
+| local       |  ano | populacao |            linear |        geometrica |       exponencial |
+|-------------+------+-----------+-------------------+-------------------+-------------------|
+| Recife (PE) | 1980 |   1196692 |                   |                   |                   |
+| Recife (PE) | 1991 |   1287208 | 0.687622819633395 |  0.66506038986911 | 0.662858619933528 |
+| Recife (PE) | 2000 |   1422904 |  1.17132066715972 |  1.11982722330943 |  1.11360357787492 |
+| Recife (PE) | 2010 |   1537702 | 0.806786684133294 | 0.778910249711395 | 0.775892404566192 |
+
+**** Estimativa populacional para 2050 e 2200
+
+Taxas de crescimento linear, geométrica e exponencial para o período 2000-2010, em formato longo:
+
+#+begin_src R :colnames yes :session
+q02f <- q02e[4,] %>%
+    pivot_longer(
+        cols = -c(local, ano, populacao)
+       ,names_to = 'taxa'
+       ,values_to = 'i'
+    ) %>%
+    rename( base = ano ) %>%
+    mutate(
+        i = as.numeric(i)/100
+    )
+#+end_src
+
+#+RESULTS:
+| local       | base | populacao | taxa        |                   i |
+|-------------+------+-----------+-------------+---------------------|
+| Recife (PE) | 2010 |   1537702 | linear      | 0.00806786684133294 |
+| Recife (PE) | 2010 |   1537702 | geometrica  | 0.00778910249711395 |
+| Recife (PE) | 2010 |   1537702 | exponencial | 0.00775892404566192 |
+
+Projeções populacionais para 2020, 2050 e 2200 por tipo de taxa:
+
+#+begin_src R :colnames yes :session
+q02f_projs <- bind_rows(
+    bind_cols(q02f, ano = 2020)
+   ,bind_cols(q02f, ano = 2050)
+   ,bind_cols(q02f, ano = 2200)
+) %>%
+    rowwise() %>%
+    mutate(
+        n = ano - base
+       ,proj = case_when(
+            taxa == 'linear' ~ populacao * (1 + n*i)
+           ,taxa == 'geometrica' ~ populacao * (1+i)^n
+           ,taxa == 'exponencial' ~ populacao * exp(i*n)
+        )
+    )
+
+q02f_projs %>%
+  pivot_wider(
+    id_cols = c(local,ano)
+   ,names_from = taxa
+   ,values_from = proj
+  )
+#+end_src
+
+#+RESULTS:
+| local       |  ano |           linear |       geometrica |      exponencial |
+|-------------+------+------------------+------------------+------------------|
+| Recife (PE) | 2020 | 1661761.74977651 | 1661761.74977651 | 1661761.74977651 |
+| Recife (PE) | 2050 | 2033940.99910605 | 2097290.04373165 | 2097290.04373166 |
+| Recife (PE) | 2200 | 3894837.24575376 | 6715945.75940498 | 6715945.75940511 |
+
+Gráficamente...
+
+#+begin_src R :results none :session
+q02f_graf <- q02f_projs %>%
+  filter( taxa != 'exponencial') %>%
+  ggplot( aes( x = ano, y = proj/1e6, group = taxa, color = taxa ) ) +
+  geom_line() +
+  geom_point() +
+  xlim(2020,2200) + 
+  labs(
+    x = 'ano'
+   ,y = 'população em milhões de pessoas'
+   ,title = 'Projeções populacionais (em 2020, 2050 e 2200) para Recife (PE)'
+   ,subtitle = 'Usando taxas de crescimento lineares e geométricas'
+  )
+
+ggsave( q02f_graf, filename = 'img/q02f.png', width = 10, height = 4)
+#+end_src
+
+#+CAPTION: Projeção populacional Recife (PE)
+#+ATTR_ORG: :width 600
+[[./img/q02f.png]]
+
+**** Tempo em anos até dobrar a população conforme a taxa de crescimento escolhida
+
+#+begin_src R :colnames yes :session 
+## tempo até dobrar a população (B/A = 2)
+q02g <- q02e[4,]
+
+## B = A*(1+i*n) ==> n = ( (B/A)-1 )/i ==> n = 1/i
+i <- as.numeric(q02g[,'linear'])/100
+q02g[,'linear'] <- 1 / i
+
+## B = A*(1+i)^n ==> n = log(B/A)/log(1+i) ==> n = log(2) / log(1+i)
+i <- as.numeric(q02g[,'geometrica'])/100
+q02g[,'geometrica'] <- log(2) / log( 1 + i )
+
+## B = A*exp(i*n) ==> n = log(B/A)/i ==> n = log(2) / i
+i <- as.numeric(q02g[,'exponencial'])/100
+q02g[,'exponencial'] <- log(2) / i
+
+names(q02g)[4:6] <- c('anos_ate_dobrar_linear','anos_ate_dobrar_geometrica','anos_ate_dobrar_exponencial')
+
+q02g
+
+#+end_src
+
+#+RESULTS:
+| local       |  ano | populacao | anos_ate_dobrar_linear | anos_ate_dobrar_geometrica | anos_ate_dobrar_exponencial |
+|-------------+------+-----------+------------------------+----------------------------+-----------------------------|
+| Recife (PE) | 2010 |   1537702 |       123.948500844962 |           89.3354769914907 |            89.3354769914895 |
+
+
+*** DATASUS
+
+Embora os dados estejam disponíveis no conhecido sistema TABNET, optou-se por buscar os dados via pacote =microdatasus= do GNU R pela grande facilidade de tratamento e praticidade.
+
+**** Tabela base para as análises
+
+#+begin_src R :results none :session
+arg_MUN <- '2611606'  # código do município do IBGE para Recife (PE)
+arg_UF  <- 'PE'
+arg_INI <- 2000
+arg_FIM <- 2019       # Dados indisponíveis para 2020 (SIM/SUS)
+
+q03 <- tibble(
+  ano = seq( from = arg_INI, to = arg_FIM, by = 1)
+ ,obitos = 0
+ ,nascidos_vivos = 0
+)
+
+## itera ano a ano as bases do DATASUS: SIM e SINASC
+for( arg_ANO in arg_INI:arg_FIM){
+  ## SIM/SUS - Óbitos por Município de Residência
+  ob <- fetch_datasus(
+    year_start = arg_ANO
+   ,year_end = arg_ANO
+   ,uf = arg_UF
+   ,information_system = "SIM-DO" ) %>%
+    filter( str_detect( CODMUNRES, str_sub(arg_MUN,start=1,end=6) ) ) %>%
+    nrow
+  q03[ which( q03$ano == arg_ANO ), 'obitos' ] <- ob
+  ## SINASC/SUS - Residência da mãe do nascido vivo
+  nv <- fetch_datasus(
+    year_start = arg_ANO
+   ,year_end = arg_ANO
+   ,uf = arg_UF
+   ,information_system = "SINASC" ) %>%
+    filter( str_detect( CODMUNRES, str_sub(arg_MUN,start=1,end=6) ) ) %>%
+    nrow
+  q03[ which( q03$ano == arg_ANO ), 'nascidos_vivos' ] <- nv
+}
+#+end_src
+
+**** Diferença (D) entre nascidos vivos (NV) e óbitos (O)
+
+#+begin_src R :colnames yes :session
+q03a <- q03 %>%
+    rename(
+        O = obitos
+        ,NV = nascidos_vivos
+    ) %>%
+    mutate( D = NV - O )
+q03a
+#+end_src
+
+#+RESULTS:
+|  ano |     O |    NV |     D |
+|------+-------+-------+-------|
+| 2000 | 10240 | 25533 | 15293 |
+| 2001 | 10080 | 25294 | 15214 |
+| 2002 | 10163 | 24307 | 14144 |
+| 2003 |  9955 | 24676 | 14721 |
+| 2004 | 10025 | 22898 | 12873 |
+| 2005 |  9993 | 23207 | 13214 |
+| 2006 | 10042 | 22646 | 12604 |
+| 2007 |  9983 | 22046 | 12063 |
+| 2008 | 10074 | 22261 | 12187 |
+| 2009 | 10362 | 22546 | 12184 |
+| 2010 | 10599 | 21796 | 11197 |
+| 2011 | 10850 | 22218 | 11368 |
+| 2012 | 10702 | 22633 | 11931 |
+| 2013 | 10765 | 23176 | 12411 |
+| 2014 | 10616 | 23506 | 12890 |
+| 2015 | 11370 | 23664 | 12294 |
+| 2016 | 11955 | 21413 |  9458 |
+| 2017 | 11821 | 22817 | 10996 |
+| 2018 | 11260 | 22212 | 10952 |
+| 2019 | 11566 | 21132 |  9566 |
+
+Graficamente...
+
+#+begin_src R :results none :session
+q03a_graf <- q03a %>%
+  pivot_longer( cols = -ano ) %>%
+  mutate(
+    name = case_when(
+      name == 'O' ~ 'Óbitos (O)'
+     ,name == 'D' ~ 'Diferença (NV-O)'
+     ,name == 'NV' ~ 'Nascidos vivos (NV)'
+    )
+  ) %>%
+  ggplot( aes(x = ano, y = value, color=name) ) +
+  geom_line() +
+  labs(
+    y = 'quantidade'
+   ,title = paste0('Recife (PE), dados de ',arg_INI,' a ',arg_FIM)
+   ,subtitle = 'Comparação entre nascidos vivos (SINASC/SUS) e óbitos (SIM/SUS)'
+   ,color = 'indicador'
+  )
+
+ggsave( q03a_graf, filename = 'img/q03a.png', width = 10, height = 5)
+#+end_src
+
+#+CAPTION: Evolução do número de nascidos vivos e óbitos Recife (PE)
+#+ATTR_ORG: :width 600
+[[./img/q03a.png]]
