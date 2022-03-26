@@ -37,7 +37,7 @@ e que resulta no [[https://sidra.ibge.gov.br/tabela/200#/n2/2/n3/26/n6/2611606/v
 https://apisidra.ibge.gov.br/values/t/200/n2/2/n3/26/n6/2611606/v/allxp/p/last%204/c2/allxt/c1/0/c58/allxt/d/v93%200
 
 Esse /endpoint/ pode ser consultado inclusive de qualquer terminal de linha de comando
-#+begin_src sh :results output
+#+begin_src sh :exports both :results output 
 curl --location --request GET 'https://apisidra.ibge.gov.br/values/t/200/n2/2/n3/26/n6/2611606/v/allxp/p/last%204/c2/allxt/c1/0/c58/allxt/d/v93%200' |
 	head -40
 #+end_src
@@ -85,6 +85,87 @@ curl --location --request GET 'https://apisidra.ibge.gov.br/values/t/200/n2/2/n3
   },
   {
 #+end_example
+[
+  {
+    "NC": "Nível Territorial (Código)",
+    "NN": "Nível Territorial",
+    "MC": "Unidade de Medida (Código)",
+    "MN": "Unidade de Medida",
+    "V": "Valor",
+    "D1C": "Grande Região, Unidade da Federação e Município (Código)",
+    "D1N": "Grande Região, Unidade da Federação e Município",
+    "D2C": "Variável (Código)",
+    "D2N": "Variável",
+    "D3C": "Ano (Código)",
+    "D3N": "Ano",
+    "D4C": "Sexo (Código)",
+    "D4N": "Sexo",
+    "D5C": "Situação do domicílio (Código)",
+    "D5N": "Situação do domicílio",
+    "D6C": "Grupo de idade (Código)",
+    "D6N": "Grupo de idade"
+  },
+  {
+    "NC": "2",
+    "NN": "Grande Região",
+    "MC": "45",
+    "MN": "Pessoas",
+    "V": "2778296",
+    "D1C": "2",
+    "D1N": "Nordeste",
+    "D2C": "93",
+    "D2N": "População residente",
+    "D3C": "1980",
+    "D3N": "1980",
+    "D4C": "4",
+    "D4N": "Homens",
+    "D5C": "0",
+    "D5N": "Total",
+    "D6C": "1140",
+    "D6N": "0 a 4 anos"
+  },
+  {
+[
+  {
+    "NC": "Nível Territorial (Código)",
+    "NN": "Nível Territorial",
+    "MC": "Unidade de Medida (Código)",
+    "MN": "Unidade de Medida",
+    "V": "Valor",
+    "D1C": "Grande Região, Unidade da Federação e Município (Código)",
+    "D1N": "Grande Região, Unidade da Federação e Município",
+    "D2C": "Variável (Código)",
+    "D2N": "Variável",
+    "D3C": "Ano (Código)",
+    "D3N": "Ano",
+    "D4C": "Sexo (Código)",
+    "D4N": "Sexo",
+    "D5C": "Situação do domicílio (Código)",
+    "D5N": "Situação do domicílio",
+    "D6C": "Grupo de idade (Código)",
+    "D6N": "Grupo de idade"
+  },
+  {
+    "NC": "2",
+    "NN": "Grande Região",
+    "MC": "45",
+    "MN": "Pessoas",
+    "V": "2778296",
+    "D1C": "2",
+    "D1N": "Nordeste",
+    "D2C": "93",
+    "D2N": "População residente",
+    "D3C": "1980",
+    "D3N": "1980",
+    "D4C": "4",
+    "D4N": "Homens",
+    "D5C": "0",
+    "D5N": "Total",
+    "D6C": "1140",
+    "D6N": "0 a 4 anos"
+  },
+  {
+
 
 **** Tabela base para as análises
 
@@ -993,7 +1074,7 @@ q02f_projs %>%
 | Recife (PE) | 2050 | 2033940.99910605 | 2097290.04373165 | 2097290.04373166 |
 | Recife (PE) | 2200 | 3894837.24575376 | 6715945.75940498 | 6715945.75940511 |
 
-Gráficamente...
+Graficamente...
 
 #+begin_src R :results none :session
 q02f_graf <- q02f_projs %>%
