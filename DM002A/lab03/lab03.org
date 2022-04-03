@@ -5,7 +5,7 @@
 
 ** Laboratório 3
 
-Para o laboratório 2 foi necessário acessar dados populacionais provenientes do SIDRA/IBGE, SINASC/SUS e SIM/SUS.
+Para o laboratório 3 foi necessário acessar dados de óbitos do SIM/SUS.
 
 Embora se possa trabalhar com arquivos do MS Excel, optou-se por consultar os dados diretamente via GNU R para facilitar o tratamento dos dados e a confecção de tabelas e gráficos pedidos na atividade.
 
