@@ -1,0 +1,134 @@
+#+startup: align indent contents
+
+
+* DM002A - Laboratório de Análise Demográfica I
+
+** Laboratório 3
+
+Para o laboratório 2 foi necessário acessar dados populacionais provenientes do SIDRA/IBGE, SINASC/SUS e SIM/SUS.
+
+Embora se possa trabalhar com arquivos do MS Excel, optou-se por consultar os dados diretamente via GNU R para facilitar o tratamento dos dados e a confecção de tabelas e gráficos pedidos na atividade.
+
+Para tanto são necessários os seguintes pacotes do GNU R para confeccionar as análises:
+
+#+begin_src R :results none :session
+library(dplyr)         # mutate, %>% ,select, filter, transmute, etc...
+library(tidyr)         # pivot_wider, pivot_longer
+library(stringr)       # str_detect, str_sub
+library(ggplot2)       # ggplot, geom_line, geom_point, ...
+library(microdatasus)  # fetch_datasus
+#+end_src
+
+*** DATASUS
+
+Embora os dados estejam disponíveis no conhecido sistema TABNET, optou-se por buscar os dados via pacote =microdatasus= do GNU R pela grande facilidade de tratamento e praticidade.
+
+**** Tabela base para as análises
+
+#+begin_src R :results none :session
+arg_MUN <- '2611606'  # código do município do IBGE para Recife (PE)
+arg_UF  <- 'PE'
+arg_INI <- 1996
+arg_FIM <- 2019       # Dados indisponíveis para 2020 (SIM/SUS)
+
+q03 <- tibble( ano = NA, sexo = NA, obitos = NA )
+
+## itera ano a ano as bases do DATASUS: SIM e SINASC
+for( arg_ANO in arg_INI:arg_FIM){
+  ## SIM/SUS - Óbitos por ano e por sexo
+  ob <- fetch_datasus(
+    year_start = arg_ANO
+   ,year_end = arg_ANO
+   ,uf = arg_UF
+   ,information_system = "SIM-DO" ) %>%
+    tibble %>%
+   count( SEXO ) %>%
+   transmute( ano = arg_ANO, sexo = SEXO, obitos = n)
+  q03 <- bind_rows(q03, ob)
+}
+
+q03 <- q03[ 2:nrow(q03), ]
+
+q03_wide <- q03 %>%
+  mutate(
+    sexo = case_when(
+      sexo == 1 ~ 'Masculino'
+     ,sexo == 2 ~ 'Feminino'
+     ,TRUE ~ 'Indefinido'
+    )
+  ) %>%
+  pivot_wider(
+    id_cols = ano
+    ,names_from = sexo
+    ,values_from = obitos
+    ,values_fill = 0
+    ,values_fn = sum
+  ) %>%
+  mutate(
+    Masculino_mm = 0,
+    Feminino_mm = 0
+  ) %>%
+  as.data.frame()
+
+mm <- 3 # média móvel de 3 elementos
+for( i in 3:nrow(q03_wide)){
+  q03_wide[i,'Masculino_mm'] <- mean( q03_wide[ (i-mm+1):i,'Masculino'] ) 
+  q03_wide[i,'Feminino_mm'] <- mean( q03_wide[ (i-mm+1):i,'Feminino'] ) 
+}
+q03_wide[1:2,'Masculino_mm'] <- NA
+q03_wide[1:2,'Feminino_mm'] <- NA
+
+q03_gr <- q03_wide %>%
+  select( -Indefinido ) %>%
+  pivot_longer(
+    -ano
+  ) %>%
+  ggplot( aes( x = ano, y = value, color = name ) ) +
+  geom_line() +
+  labs(
+    x = 'ano do óbito'
+   ,y = 'quantidade de óbitos'
+   ,color = ''
+   ,subtitle = 'Comparação das séries originais e das médias móveis de 3 elementos'
+   ,title = 'Óbitos por sexo em Recife (PE) de 1996 a 2019'
+   ,caption = 'Fonte: Datasus/SIM'
+  )
+
+q03_gr %>% 
+  ggsave( filename = 'img/q03.png', width = 10, height = 4)
+#+end_src
+
+#+begin_src R :exports results :results table :colnames yes :session
+q03_wide
+#+end_src
+
+#+RESULTS:
+|  ano | Indefinido | Masculino | Feminino |     Masculino_mm |      Feminino_mm |
+|------+------------+-----------+----------+------------------+------------------|
+| 1996 |        173 |     27487 |    20760 |              nil |              nil |
+| 1997 |        112 |     28252 |    21168 |              nil |              nil |
+| 1998 |         45 |     29773 |    22145 |            28504 | 21357.6666666667 |
+| 1999 |         59 |     29925 |    21760 | 29316.6666666667 |            21691 |
+| 2000 |         34 |     30333 |    22102 | 30010.3333333333 | 22002.3333333333 |
+| 2001 |         35 |     30356 |    21477 | 30204.6666666667 | 21779.6666666667 |
+| 2002 |         32 |     30222 |    21940 | 30303.6666666667 | 21839.6666666667 |
+| 2003 |         19 |     30299 |    22594 | 30292.3333333333 | 22003.6666666667 |
+| 2004 |         23 |     30434 |    23103 | 30318.3333333333 | 22545.6666666667 |
+| 2005 |         17 |     29571 |    22659 | 30101.3333333333 | 22785.3333333333 |
+| 2006 |         14 |     29575 |    22296 |            29860 |            22686 |
+| 2007 |         37 |     30560 |    22741 |            29902 | 22565.3333333333 |
+| 2008 |         47 |     30684 |    23393 |            30273 |            22810 |
+| 2009 |         32 |     30822 |    23824 | 30688.6666666667 | 23319.3333333333 |
+| 2010 |         37 |     30754 |    23779 | 30753.3333333333 | 23665.3333333333 |
+| 2011 |         48 |     32240 |    24931 |            31272 |            24178 |
+| 2012 |         44 |     31637 |    25451 | 31543.6666666667 | 24720.3333333333 |
+| 2013 |         39 |     32238 |    25932 | 32038.3333333333 |            25438 |
+| 2014 |         31 |     32225 |    25567 | 32033.3333333333 |            25650 |
+| 2015 |         58 |     34532 |    27966 | 32998.3333333333 | 26488.3333333333 |
+| 2016 |         36 |     37078 |    29814 | 34611.6666666667 | 27782.3333333333 |
+| 2017 |         42 |     35905 |    28417 | 35838.3333333333 | 28732.3333333333 |
+| 2018 |         48 |     34227 |    27736 | 35736.6666666667 | 28655.6666666667 |
+| 2019 |         33 |     35032 |    29230 | 35054.6666666667 |            28461 |
+
+#+caption: Comparação das séries original e suavizada (média móvel de 3 elementos) dos óbitos por sexo em Recife (PE) de 1996 a 2019
+[[file:img/q03.png]]
