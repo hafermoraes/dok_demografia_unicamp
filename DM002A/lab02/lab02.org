@@ -183,7 +183,7 @@ q02_sidra <- RCurl::getURL( url = url_API ) %>%   # baixa o conteúdo da URL em 
     )
   )
 
-q02_sidra %>% head(10)
+q02_sidra %>% head(10) %>% View
 #+end_src
 
 #+RESULTS:

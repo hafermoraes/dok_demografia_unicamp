@@ -71,7 +71,7 @@ q03_wide <- q03 %>%
   as.data.frame()
 
 mm <- 3 # média móvel de 3 elementos
-for( i in 3:nrow(q03_wide)){
+for( i in mm:nrow(q03_wide)){
   q03_wide[i,'Masculino_mm'] <- mean( q03_wide[ (i-mm+1):i,'Masculino'] ) 
   q03_wide[i,'Feminino_mm'] <- mean( q03_wide[ (i-mm+1):i,'Feminino'] ) 
 }

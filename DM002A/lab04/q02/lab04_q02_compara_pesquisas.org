@@ -1,0 +1,547 @@
+
+#+begin_src R :exports code :results none :session
+library(readxl)   # read_excel
+library(writexl)  # write_excel
+library(stringr)  # str_split
+library(dplyr)    # %>%
+library(tibble)  # tribble
+library(tidyr)    # pivot_wider
+#+end_src
+
+* PNAD
+
+  Fonte: =ftp.ibge.gov.br/Trabalho_e_Rendimento/Pesquisa_Nacional_por_Amostra_de_Domicilios_anual/microdados=
+  
+  #+begin_src R :exports code :results none :session
+  path_to_files <- './pnad/dicionario_variaveis/'
+
+  res <- tribble(
+	~c01, ~c02, ~c03, ~c04, ~c05, ~c06, ~c07, ~c08, ~c09, ~c10,
+	NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, NA_character_,
+	)
+
+  for( arg_file in list.files( path_to_files )){
+	print( paste0('treating file named ', arg_file ,'...') )
+	## arg_file <- 'pnad_2001_dom.xls'
+	raw <- read_excel(
+	  path = paste0(path_to_files, arg_file )
+	 ,sheet = 1
+	 ,skip = 3
+	 ,col_names = FALSE
+	)
+	## reorganização das colunas
+	raw[, c('...8','...9','..10') ] <- NA_character_
+	raw <- raw[, c(8,9,10, 1:7) ]    # reordena colunas
+	## Novos nomes de colunas do data frame 'raw'
+	names(raw) <- sprintf( 'c%02d', 1:ncol(raw) )
+	##  c01 pesquisa (pnad_dom, pnad_pes)
+	##  c02 ano
+	##  c03 parte (área temática da pesquisa)
+	##  c04 posição inicial
+	##  c05 tamanho do campo
+	##  c06 código da variável
+	##  c07 quesito_nr
+	##  c08 quesito_desc
+	##  c09 categ_nr
+	##  c10 categ_desc
+	##
+	## ignora a extensão do arquivo e separa nome do arquivo em um vetor
+	aux_str <- unlist( str_split( string = arg_file, pattern = "\\." ) )[1]
+	aux_str <- str_split( string = aux_str, pattern = '_' ) %>% unlist
+	## preenche novas colunas com valores tratados
+	raw[,'c01'] <- paste0( aux_str[1], "_", aux_str[3]) # pesquisa
+	raw[,'c02'] <- aux_str[2]                           # ano
+	rm(aux_str)
+	## mantém somente linhas que...
+	raw <- raw %>%
+	  filter(
+		!grepl('[^0-9]', c04) |  # comecem com números
+		str_starts( string = c04, pattern = 'PARTE') | # iniciem com 'PARTE'
+		is.na(c04) # e tenham conteúdo NA
+	  )
+	## preenche coluna c03
+	for(i in 1:nrow(raw) ){
+	  if( !is.na(raw[i,'c04']) && str_starts( string = raw[i,'c04'], pattern = 'PARTE' ) ){
+		raw[i,'c03'] <- raw[i,'c04']
+		raw[i,'c04'] <- NA
+	  }
+	}
+	for(i in 2:nrow(raw) ){
+	  if( is.na(raw[i,'c03']) && !is.na(raw[i-1,'c03']) ) {
+		raw[i,'c03'] <- raw[i-1,'c03']
+	  }
+	}
+	## remove linhas com NA de c04 a c10
+	raw <- raw %>% 
+	  filter(
+		!(is.na(c04) & is.na(c05) & is.na(c06) & is.na(c07) & is.na(c08) & is.na(c09) & is.na(c10) )
+	  )
+	## preenche células NA das colunas c04, c05, c06, c07 e c08
+	for(i in 2:nrow(raw) ){
+	  if( is.na(raw[i,'c04']) && !is.na(raw[i-1,'c04']) ) {
+		raw[i,'c04'] <- raw[i-1,'c04']
+	  }
+	  if( is.na(raw[i,'c05']) && !is.na(raw[i-1,'c05']) ) {
+		raw[i,'c05'] <- raw[i-1,'c05']
+	  }
+	  if( is.na(raw[i,'c06']) && !is.na(raw[i-1,'c06']) ) {
+		raw[i,'c06'] <- raw[i-1,'c06']
+	  }
+	  if( is.na(raw[i,'c07']) && !is.na(raw[i-1,'c07']) ) {
+		raw[i,'c07'] <- raw[i-1,'c07']
+	  }
+	  if( is.na(raw[i,'c08']) && !is.na(raw[i-1,'c08']) ) {
+		raw[i,'c08'] <- raw[i-1,'c08']
+	  }
+	}
+	raw <- raw %>% mutate_all( as.character ) # https://stackoverflow.com/a/43795362
+	res <- bind_rows(res, raw)
+  }
+
+  ## remove a linha dummy introduzida na criação da tabela 'res'
+  res <- res[-1,] 
+
+  ## Harmonização dos enunciados das variáveis
+  res <- res %>%
+	mutate(
+	  c03 = str_trim( 
+		toupper(
+		  stringi::stri_trans_general(
+					 str = c03
+					,id  = 'Latin-ASCII'
+				   ) # stri_trans_general
+		) #to_upper
+	  )
+	 ,c06 = str_trim( 
+		toupper(
+		  stringi::stri_trans_general(
+					 str = c06
+					,id  = 'Latin-ASCII'
+				   ) # stri_trans_general
+		) #to_upper
+	  )
+	 ,c06 = str_replace_all( string = c06, pattern = ' ', replacement = '')
+	 ,c08 = str_trim( 
+		toupper(
+		  stringi::stri_trans_general(
+					 str = c08
+					,id  = 'Latin-ASCII'
+				   ) # stri_trans_general
+		) #to_upper
+	  )
+	)
+
+  ## PNAD por Domicílio e por Pessoa
+  res  %>%
+	write_xlsx( 'pnad_questoes.xlsx' )
+
+
+  ## Comparação das respostas entre questionários
+  enuncs_mais_recentes <- res %>%
+	select (c01, c06, c02, c08 ) %>% na.omit() %>%
+	group_by( c01, c06 ) %>% summarise( ult_edicao = max( c02 ) ) %>%
+	left_join(
+	  res %>%
+	  select (c01, c06, c02, c08 ) %>% na.omit() %>%  unique() %>%
+	  rename( ult_enunciado = c08 )
+	 ,by = c('c01'='c01','c06'='c06','ult_edicao'='c02')
+	) 
+
+  res  %>%
+	left_join( # enunciados mais recentes por tipo de pesquisa
+	  enuncs_mais_recentes
+	 ,by = c('c01'='c01','c06'='c06')
+	) %>% 
+	select( c01, c02, c03, c06, c09, c10, ult_enunciado, ult_edicao ) %>% 
+	unique() %>%
+	pivot_wider(
+	  id_cols = c(c01, c03, c06, ult_enunciado, ult_edicao, c09)
+	 ,names_from = c02
+	 ,values_from = c10
+	 ,values_fn = min
+	) %>%
+	arrange( c01, c03, c06, c09 ) %>% 
+	write_xlsx( 'pnad_dom_compara_respostas.xlsx' )
+
+
+  ## Comparação PNAD por Domicílio
+  res  %>%
+	filter( c01 == 'pnad_dom' ) %>%
+	select( c02, c03, c06, c08 ) %>%
+	unique() %>%
+	pivot_wider(
+	  id_cols = c(c03, c06)
+	 ,names_from = c02
+	 ,values_from = c08
+	) %>%
+	arrange( c03, c06 ) %>%
+	write_xlsx( 'pnad_dom_comp.xlsx' )
+
+  res  %>%
+	filter( c01 == 'pnad_dom' ) %>%
+	select( c02, c03) %>%
+	unique() %>%
+	pivot_wider(
+	  id_cols = c(c03)
+	 ,names_from = c02
+	 ,values_from = c02
+	 ,values_fn = length
+	) %>%
+	arrange( c03 ) %>%
+	write_xlsx( 'pnad_dom_comp_tematicas.xlsx' )
+
+
+  ## Comparação PNAD Pessoas
+  res  %>%
+	filter( c01 == 'pnad_pes' ) %>%
+	select( c02, c03, c06, c08 ) %>%
+	unique() %>% 
+	pivot_wider(
+	  id_cols = c(c03, c06)
+	 ,names_from = c02
+	 ,values_from = c08
+	 ,values_fn = min
+	) %>% 
+	arrange( c03, c06 ) %>% 
+	write_xlsx( 'pnad_pes_comp.xlsx' )
+
+  res  %>%
+	filter( c01 == 'pnad_pes' ) %>%
+	select( c02, c03) %>%
+	unique() %>%
+	pivot_wider(
+	  id_cols = c(c03)
+	 ,names_from = c02
+	 ,values_from = c02
+	 ,values_fn = length
+	) %>%
+	arrange( c03 ) %>%
+	write_xlsx( 'pnad_pes_comp_tematicas.xlsx' )
+  #+end_src
+  
+* PNAD Contínua
+
+  Fonte: =ftp.ibge.gov.br/Trabalho_e_Rendimento/Pesquisa_Nacional_por_Amostra_de_Domicilios_continua/Trimestral/Microdados/Documentacao=
+    
+  #+begin_src R :exports code :results none :session
+  path_to_files <- './pnad_continua/dicionario_variaveis/'
+  arg_file <- 'dicionario_PNADC_microdados_trimestral.xls'
+
+  res <- tribble(
+	~c01, ~c02, ~c03, ~c04, ~c05, ~c06, ~c07, ~c08, ~c09, ~c10,
+	NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, NA_character_,
+	)
+
+  raw <- read_excel(
+	path = paste0(path_to_files, arg_file )
+   ,sheet = 1
+   ,skip = 3
+   ,col_names = FALSE
+  )
+  ## reorganização das colunas
+  raw[, c('...9','..10') ] <- NA_character_
+  raw <- raw[, c(9,8,10, 1:7) ]    # reordena colunas
+  ## Novos nomes de colunas do data frame 'raw'
+  names(raw) <- sprintf( 'c%02d', 1:ncol(raw) )
+  ##  c01 pesquisa (pnadc_trimestral)
+  ##  c02 período
+  ##  c03 parte (área temática da pesquisa)
+  ##  c04 posição inicial
+  ##  c05 tamanho do campo
+  ##  c06 código da variável
+  ##  c07 quesito_nr
+  ##  c08 quesito_desc
+  ##  c09 categ_nr
+  ##  c10 categ_desc
+  ##
+  ## ignora a extensão do arquivo e separa nome do arquivo em um vetor
+  aux_str <- unlist( str_split( string = arg_file, pattern = "\\." ) )[1]
+  aux_str <- str_split( string = aux_str, pattern = '_' ) %>% unlist
+  ## preenche novas colunas com valores tratados
+  raw[,'c01'] <- paste0( aux_str[2], "_", aux_str[4]) # pesquisa
+  rm(aux_str)
+  ## mantém somente linhas que...
+  raw <- raw %>% 
+	filter(
+	  !c04 %in% c('Variáveis Derivadas','Pesos Replicados','2 - Pessoas Ocupadas','3 - Pessoas não ocupadas')
+	)
+  ## preenche coluna c03
+  for(i in 1:nrow(raw) ){
+	if( !is.na(raw[i,'c04']) && str_starts( string = raw[i,'c04'], pattern = 'Parte' ) ){
+	  raw[i,'c03'] <- raw[i,'c04']
+	  raw[i,'c04'] <- NA
+	}
+  }
+  for(i in 2:nrow(raw) ){
+	if( is.na(raw[i,'c03']) && !is.na(raw[i-1,'c03']) ) {
+	  raw[i,'c03'] <- raw[i-1,'c03']
+	}
+  }
+  ## remove linhas com NA de c04 a c10
+  raw <- raw %>% 
+	filter(
+	  !(is.na(c04) & is.na(c05) & is.na(c06) & is.na(c07) & is.na(c08) & is.na(c09) & is.na(c10) )
+	)
+  ## preenche células NA das colunas c04, c05, c06, c07 e c08
+  for(i in 2:nrow(raw) ){
+	if( is.na(raw[i,'c02']) && !is.na(raw[i-1,'c02']) ) {
+	  raw[i,'c02'] <- raw[i-1,'c02']
+	}
+	if( is.na(raw[i,'c04']) && !is.na(raw[i-1,'c04']) ) {
+	  raw[i,'c04'] <- raw[i-1,'c04']
+	}
+	if( is.na(raw[i,'c05']) && !is.na(raw[i-1,'c05']) ) {
+	  raw[i,'c05'] <- raw[i-1,'c05']
+	}
+	if( is.na(raw[i,'c06']) && !is.na(raw[i-1,'c06']) ) {
+	  raw[i,'c06'] <- raw[i-1,'c06']
+	}
+	if( is.na(raw[i,'c07']) && !is.na(raw[i-1,'c07']) ) {
+	  raw[i,'c07'] <- raw[i-1,'c07']
+	}
+	if( is.na(raw[i,'c08']) && !is.na(raw[i-1,'c08']) ) {
+	  raw[i,'c08'] <- raw[i-1,'c08']
+	}
+  }
+  raw <- raw %>% mutate_all( as.character ) # https://stackoverflow.com/a/43795362
+  ##res <- bind_rows(res, raw)
+  res <- raw
+
+  ## Harmonização dos enunciados das variáveis
+  res <- res %>% 
+	mutate(
+	  c03 = str_trim( 
+		toupper(
+		  stringi::stri_trans_general(
+					 str = c03
+					,id  = 'Latin-ASCII'
+				   ) # stri_trans_general
+		) #to_upper
+	  )
+	 ,c02 = str_trim( 
+		toupper(
+		  stringi::stri_trans_general(
+					 str = c02
+					,id  = 'Latin-ASCII'
+				   ) # stri_trans_general
+		) #to_upper
+	  )
+	 ,c06 = str_trim( 
+		toupper(
+		  stringi::stri_trans_general(
+					 str = c06
+					,id  = 'Latin-ASCII'
+				   ) # stri_trans_general
+		) #to_upper
+	  )
+	 ,c06 = str_replace_all( string = c06, pattern = ' ', replacement = '')
+	 ,c08 = str_trim( 
+		toupper(
+		  stringi::stri_trans_general(
+					 str = c08
+					,id  = 'Latin-ASCII'
+				   ) # stri_trans_general
+		) #to_upper
+	  )
+	)
+
+  ## PNADC
+  res  %>% View
+	write_xlsx( 'pnadc_questoes.xlsx' )
+
+  ## Comparação temática PNADC
+  res  %>%
+	select( c02, c03, c08 ) %>%
+	unique() %>%
+	pivot_wider(
+	  id_cols = c(c03)
+	 ,names_from = c02
+	 ,values_from = c08
+	  ,values_fn = length
+	) %>%
+	arrange( c03 ) %>% 
+	write_xlsx( 'pnadc_comp.xlsx' )
+  #+end_src
+  
+* PNAD COVID
+
+  Fonte: =ftp.ibge.gov.br/Trabalho_e_Rendimento/Pesquisa_Nacional_por_Amostra_de_Domicilios_PNAD_COVID19/Microdados/Documentacao=
+
+  #+begin_src R :exports code :results none :session
+  path_to_files <- './pnad_covid/dicionario_variaveis/'
+
+  res <- tribble(
+	~c01, ~c02, ~c03, ~c04, ~c05, ~c06, ~c07, ~c08, ~c09, 
+	NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, NA_character_, 
+	)
+
+  for( arg_file in list.files( path_to_files )){
+	print( paste0('treating file named ', arg_file ,'...') )
+	## arg_file <- 'Dicionario_PNAD_COVID_052020_20210726.xls'
+	raw <- read_excel(
+	  path = paste0(path_to_files, arg_file )
+	 ,sheet = 1
+	 ,skip = 3
+	 ,col_names = FALSE
+	)
+	## reorganização das colunas
+	raw[, c('...7','...8','..9') ] <- NA_character_
+	raw <- raw[, c(7,8,9, 1:6) ]    # reordena colunas
+	## Novos nomes de colunas do data frame 'raw'
+	names(raw) <- sprintf( 'c%02d', 1:ncol(raw) )
+	##  c01 pesquisa (pnad_covid)
+	##  c02 mês
+	##  c03 parte (área temática da pesquisa)
+	##  c04 posição inicial
+	##  c05 tamanho do campo
+	##  c06 código da variável
+	##  c07 quesito_nr
+	##  c08 quesito_desc
+	##  c09 categ_nr
+	##  c10 categ_desc
+	##
+	## ignora a extensão do arquivo e separa nome do arquivo em um vetor
+	aux_str <- unlist( str_split( string = arg_file, pattern = "\\." ) )[1]
+	aux_str <- str_split( string = aux_str, pattern = '_' ) %>% unlist
+	## preenche novas colunas com valores tratados
+	raw[,'c01'] <- paste0( aux_str[2], "_", aux_str[3]) # pesquisa
+	raw[,'c02'] <- aux_str[4]                           # ano
+	rm(aux_str)
+	## mantém somente linhas que...
+	raw <- raw %>% 
+	  filter(
+		!grepl('[^0-9]', c04) |  # comecem com números
+		str_starts( string = c04, pattern = 'Parte') | # iniciem com 'PARTE'
+		is.na(c04) # e tenham conteúdo NA
+	  )
+	## preenche coluna c03
+	for(i in 1:nrow(raw) ){
+	  if( !is.na(raw[i,'c04']) && str_starts( string = raw[i,'c04'], pattern = 'Parte' ) ){
+		raw[i,'c03'] <- raw[i,'c04']
+		raw[i,'c04'] <- NA
+	  }
+	}
+	for(i in 2:nrow(raw) ){
+	  if( is.na(raw[i,'c03']) && !is.na(raw[i-1,'c03']) ) {
+		raw[i,'c03'] <- raw[i-1,'c03']
+	  }
+	}
+	## remove linhas com NA de c04 a c10
+	raw <- raw %>% 
+	  filter(
+		!(is.na(c04) & is.na(c05) & is.na(c06) & is.na(c07) & is.na(c08) & is.na(c09) )
+	  )
+	## preenche células NA das colunas c04, c05, c06, c07 e c08
+	for(i in 2:nrow(raw) ){
+	  if( is.na(raw[i,'c04']) && !is.na(raw[i-1,'c04']) ) {
+		raw[i,'c04'] <- raw[i-1,'c04']
+	  }
+	  if( is.na(raw[i,'c05']) && !is.na(raw[i-1,'c05']) ) {
+		raw[i,'c05'] <- raw[i-1,'c05']
+	  }
+	  if( is.na(raw[i,'c06']) && !is.na(raw[i-1,'c06']) ) {
+		raw[i,'c06'] <- raw[i-1,'c06']
+	  }
+	  if( is.na(raw[i,'c07']) && !is.na(raw[i-1,'c07']) ) {
+		raw[i,'c07'] <- raw[i-1,'c07']
+	  }
+	  if( is.na(raw[i,'c08']) && !is.na(raw[i-1,'c08']) ) {
+		raw[i,'c08'] <- raw[i-1,'c08']
+	  }
+	}
+	raw <- raw %>% mutate_all( as.character ) # https://stackoverflow.com/a/43795362
+	res <- bind_rows(res, raw)
+  }
+
+  ## remove a linha dummy introduzida na criação da tabela 'res'
+  res <- res[-1,] 
+
+  ## Harmonização dos enunciados das variáveis
+  res <- res %>%
+	mutate(
+	  c03 = str_trim( 
+		toupper(
+		  stringi::stri_trans_general(
+					 str = c03
+					,id  = 'Latin-ASCII'
+				   ) # stri_trans_general
+		) #to_upper
+	  )
+	 ,c05 = str_trim( 
+		toupper(
+		  stringi::stri_trans_general(
+					 str = c05
+					,id  = 'Latin-ASCII'
+				   ) # stri_trans_general
+		) #to_upper
+	  )
+	 ,c05 = str_replace_all( string = c05, pattern = ' ', replacement = '')
+	 ,c07 = str_trim( 
+		toupper(
+		  stringi::stri_trans_general(
+					 str = c07
+					,id  = 'Latin-ASCII'
+				   ) # stri_trans_general
+		) #to_upper
+	  )
+	)
+
+  ## PNAD Covid por mês
+  res  %>%
+	write_xlsx( 'pnad_covid_questoes.xlsx' )
+
+
+  ## Comparação das respostas entre questionários
+  enuncs_mais_recentes <- res %>% 
+	select (c01, c05, c02, c07 ) %>% na.omit() %>%
+	group_by( c01, c05 ) %>% summarise( ult_edicao = max( c02 ) ) %>%
+	left_join(
+	  res %>%
+	  select (c01, c05, c02, c07 ) %>% na.omit() %>%  unique() %>%
+	  rename( ult_enunciado = c07 )
+	 ,by = c('c01'='c01','c05'='c05','ult_edicao'='c02')
+	) 
+
+  res  %>%
+	left_join( # enunciados mais recentes por tipo de pesquisa
+	  enuncs_mais_recentes
+	 ,by = c('c01'='c01','c05'='c05')
+	) %>% 
+	select( c01, c02, c03, c05, c08, c09, ult_enunciado, ult_edicao ) %>% 
+	unique() %>%
+	pivot_wider(
+	  id_cols = c(c01, c03, c05, ult_enunciado, ult_edicao, c08)
+	 ,names_from = c02
+	 ,values_from = c09
+	 ,values_fn = min
+	) %>%
+	arrange( c01, c03, c05, c08 ) %>% 
+	write_xlsx( 'pnad_covid_compara_respostas.xlsx' )
+
+
+  ## Comparação PNAD COVID por mês
+  res  %>%
+	select( c02, c03, c05, c07 ) %>%
+	unique() %>%
+	pivot_wider(
+	  id_cols = c(c03, c05)
+	 ,names_from = c02
+	 ,values_from = c07
+	) %>%
+	arrange( c03, c05 ) %>% 
+	write_xlsx( 'pnad_covid_comp.xlsx' )
+
+  res  %>%
+	select( c02, c03) %>%
+	unique() %>%
+	pivot_wider(
+	  id_cols = c(c03)
+	 ,names_from = c02
+	 ,values_from = c02
+	 ,values_fn = length
+	) %>%
+	arrange( c03 ) %>% 
+	write_xlsx( 'pnad_covid_comp_tematicas.xlsx' )
+
+
+  #+end_src
