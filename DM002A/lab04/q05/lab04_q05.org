@@ -3,7 +3,9 @@
 #+begin_src R :exports code :results none :session
 library(ggplot2)   # geom_bar
 library(dplyr)     # %>%
-library(readxl)    # read_excel
+library(readxl)    # read_excelcc
+library(simPop)    # sprague
+library(writexl)   # write_xlsx
 library(tidyr)     # pivot_longer, pivot_wider
 #+end_src
 
@@ -43,6 +45,10 @@ library(tidyr)     # pivot_longer, pivot_wider
   q05a_graf %>% ggsave( filename = 'img/q05a.png', width = 7, height = 6)
   #+end_src
 
+  #+caption: Pirâmide etária da Bolívia (1976)
+  #+ATTR_ORG: :width 600
+  [[file:img/q05a.png]]
+  
 * 5b 
 
   #+begin_src R :exports code :results table :colnames yes :rownames yes :session
@@ -77,3 +83,150 @@ library(tidyr)     # pivot_longer, pivot_wider
   | IM_8      |  1.18 |  108.51 |
   | IM_9      |  1.86 |   75.21 |
   | IM_GLOBAL | 19.58 |  144.87 |
+
+* 5c
+
+  #+begin_src R :exports code :results table :colnames yes  :session
+
+  BINS <- seq( from = 0, to = 100, by = 5 )
+
+  q05c_grp <- q05a %>%
+	mutate(
+	  fx_idade = cut( # discretização da idade em faixas quinquenais
+		x = Idade
+	   ,breaks = BINS
+	   ,include.lowest = TRUE # idade (do intervalo) inferior completa
+	   ,right = FALSE         # idade (do intervalo) superior incompleta
+	  )
+	) %>%
+	group_by( fx_idade ) %>%
+	summarise(
+	  homens = sum(Homens)
+	 ,mulheres = sum(Mulheres)
+	 ,total = sum(Total)
+	)
+
+  q05c_grp %>% 
+	write_xlsx( 'fx_idade.xlsx')
+
+  q05c_grp
+  #+end_src
+
+  #+RESULTS:
+  | fx_idade | homens | mulheres |  total |
+  |----------+--------+----------+--------|
+  | [0,5)    | 369620 |   362530 | 732150 |
+  | [5,10)   | 318260 |   312280 | 630540 |
+  | [10,15)  | 281910 |   266580 | 548490 |
+  | [15,20)  | 249530 |   250450 | 499980 |
+  | [20,25)  | 198570 |   210480 | 409050 |
+  | [25,30)  | 167680 |   177020 | 344700 |
+  | [30,35)  | 134140 |   139940 | 274080 |
+  | [35,40)  | 115550 |   126320 | 241870 |
+  | [40,45)  |  93170 |   100190 | 193360 |
+  | [45,50)  |  95560 |   102570 | 198130 |
+  | [50,55)  |  66840 |    75060 | 141900 |
+  | [55,60)  |  54330 |    58590 | 112920 |
+  | [60,65)  |  45310 |    52640 |  97950 |
+  | [65,70)  |  31200 |    36430 |  67630 |
+  | [70,75)  |  20970 |    27470 |  48440 |
+  | [75,80)  |  14680 |    17030 |  31710 |
+  | [80,85)  |   9280 |    12490 |  21770 |
+  | [85,90)  |   4360 |     5450 |   9810 |
+  | [90,95)  |   2640 |     3260 |   5900 |
+  | [95,100] |   3490 |     3120 |   6610 |
+
+*** Sprague
+
+	#+begin_src R :exports code :results table :colnames yes :rownames yes :session
+
+	## https://www.rdocumentation.org/packages/simPop/versions/1.2.1/topics/sprague
+
+	sprague.breaks <- c(
+	  seq( from = 0, to = 80, by = 5)
+	 ,Inf
+	)
+
+	sprague.labels <- c(
+	  "0-4",
+	  "5-9","10-14","15-19", "20-24",
+	  "25-29","30-34","35-39","40-44","45-49",
+	  "50-54","55-59","60-64","65-69","70-74","75-79","80+"
+	)
+
+	q05c <- q05a %>%
+	  mutate(
+		age = cut(
+		  x = Idade
+		  ,breaks = sprague.breaks
+		  ,labels = sprague.labels
+		  ,include.lowest = TRUE
+		  ,right = FALSE
+		)
+	  ) %>%
+	  group_by( age ) %>%
+	  summarise(
+		homens = sum(Homens)
+	   ,mulheres = sum(Mulheres)
+	   ,pop = sum(Total)
+	  ) %>%
+	  as.data.frame()
+
+	h  <- sprague(q05c[,'homens'])
+	m  <- sprague(q05c[,'mulheres'])
+	t  <- sprague(q05c[,'pop'])
+
+	all.equal(sum(h), sum(q05c_sprague[,'homens']))
+
+	q05c_piramides <- q05a %>%
+	  mutate(
+		idade_80m = factor(
+		  x = case_when(
+			Idade < 80 ~ as.character(Idade)
+		   ,TRUE ~ '80+'
+		  )
+		 ,levels = c( as.character(0:79), '80+')
+		)
+	  ) %>%
+	  group_by( idade_80m ) %>%
+	  summarise(
+		Homens_original = sum(Homens)
+		,Mulheres_original = sum(Mulheres)
+		,pop_original = sum(Total)
+	  ) %>%
+	  as.data.frame()
+
+	q05c_piramides$Homens_sprague <- h
+	q05c_piramides$Mulheres_sprague <- m
+	q05c_piramides$pop_sprague <- t
+
+	q05c_graf <- q05c_piramides %>%
+	  pivot_longer(
+		cols = -idade_80m
+	   ,names_pattern = '(.*)_(.*)'
+	   ,names_to = c('sexo','tipo')
+	   ,values_to = 'pop'
+	  ) %>%
+	  filter( sexo != 'pop') %>%
+	  ggplot( aes(x = idade_80m, fill = sexo,
+				  y = ifelse(test = sexo == "Homens",
+							 yes = -pop, no = pop)/1e3)) + 
+	  geom_bar(stat = "identity") +
+	  scale_y_continuous(labels = abs, limits = max(q05c_piramides$pop_original)/1e3 * c(-1,1)) +
+	  coord_flip() +
+	  labs(
+		x = 'idade'
+	   ,y = "População (em mihares de pessoas)"
+	   ,title = 'Pirâmides etárias para Bolívia (1976)'
+	   ,subtitle = 'Comparação dos dados originais e desagregados pelo Método de Sprague'
+	   ,fill = ''
+	  )+ 
+	  facet_grid(~ tipo ) +
+	  theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+	q05c_graf %>% ggsave( filename = 'img/q05c_piramides.png', width = 15, height = 10)
+	#+end_src
+
+	#+caption: Comparativo Original/Sprague - Pirâmide etária da Bolívia (1976)
+	#+ATTR_ORG: :width 600
+	[[file:img/q05c_piramides.png]]
