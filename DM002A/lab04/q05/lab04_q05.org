@@ -1,0 +1,79 @@
+
+
+#+begin_src R :exports code :results none :session
+library(ggplot2)   # geom_bar
+library(dplyr)     # %>%
+library(readxl)    # read_excel
+library(tidyr)     # pivot_longer, pivot_wider
+#+end_src
+
+
+* 5a
+
+  #+begin_src R :exports code :results none :session
+
+  q05a <- read_excel(
+	path = './raw/PopulacaoPaises.xlsx'
+	,sheet = 'Bolívia'
+	,range = 'A2:D101' ) %>%
+	mutate( Idade = as.numeric(Idade) )
+
+  q05a_data <- q05a %>% select( -Total) %>%
+	pivot_longer(
+	  cols = -Idade
+	 ,names_to = 'sexo'
+	 ,values_to = 'pop'
+	)
+
+  q05a_graf <- q05a_data %>%   # https://www.statology.org/population-pyramid-in-r/
+	ggplot( aes(x = Idade, fill = sexo,
+				y = ifelse(test = sexo == "Homens",
+						   yes = -pop, no = pop))) + 
+	geom_bar(stat = "identity") +
+	scale_y_continuous(labels = abs, limits = max(q05a_data$pop) * c(-1,1)) +
+	coord_flip() +
+	labs(
+	  x = 'idade'
+	 ,y = "População"
+	 ,title = 'Pirâmide etária para Bolívia (1976)'
+	 ,fill = ''
+	) +
+	theme(axis.text.x = element_text(angle = 90, hjust = 1))
+
+  q05a_graf %>% ggsave( filename = 'img/q05a.png', width = 7, height = 6)
+  #+end_src
+
+* 5b 
+
+  #+begin_src R :exports code :results table :colnames yes :rownames yes :session
+  source("http://www.nepo.unicamp.br/publicacoes/textos_nepo/script/download.php")
+
+  q05b <- q05a %>%
+	select( Total ) %>%
+	as.matrix(ncol = 101) %>% t() %>% cbind(., 0)
+
+  q05b_colnames <- q05a[,'Idade'] %>% as.data.frame
+  colnames(q05b) <- c(q05b_colnames$Idade,100)
+
+  ## Comparação dos Índices de Meyers e Whipple
+  data.frame(
+	Myers = IM(q05b)
+   ,Whipple = IW(q05b)
+  )
+
+  #+end_src
+
+  #+RESULTS:
+  |           | Myers | Whipple |
+  |-----------+-------+---------|
+  | IM_0      |  5.11 |  148.79 |
+  | IM_1      |  2.97 |   55.07 |
+  | IM_2      |  0.17 |   80.45 |
+  | IM_3      |  1.55 |  101.09 |
+  | IM_4      |  1.44 |    96.6 |
+  | IM_5      |  2.94 |  140.94 |
+  | IM_6      |  0.56 |  113.28 |
+  | IM_7      |   1.8 |   80.06 |
+  | IM_8      |  1.18 |  108.51 |
+  | IM_9      |  1.86 |   75.21 |
+  | IM_GLOBAL | 19.58 |  144.87 |
