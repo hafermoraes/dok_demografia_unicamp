@@ -200,6 +200,9 @@ library(tidyr)     # pivot_longer, pivot_wider
 	q05c_piramides$Mulheres_sprague <- m
 	q05c_piramides$pop_sprague <- t
 
+	q05c_piramides %>% 
+		write_xlsx( 'q05c_dados_pirâmides.xlsx')
+
 	q05c_graf <- q05c_piramides %>%
 	  pivot_longer(
 		cols = -idade_80m
