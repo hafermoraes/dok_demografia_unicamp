@@ -5,6 +5,7 @@ library(dplyr)
 library(maps)
 library(mapproj)
 library(stringr)
+library(ggspatial)
 
 raw <- read_excel(
     path = '../raw/Dados_Plotagem_Corrigido_v2.xlsx'
@@ -26,6 +27,16 @@ raw <- read_excel(
            ,str_detect( string = plataforma, pattern = 'attenu'      ) ~ 'Inactivated/Live attenuated virus'
            ,TRUE ~ as.character( plataforma )
         )
+       ,plataforma_reclass = factor(
+            plataforma_reclass
+            ,levels = c(
+                 'Protein subunit'
+                ,'Inactivated/Live attenuated virus'
+                ,'Viral vector/Virus like particle'
+                ,'DNA based vaccine'
+                ,'RNA based vaccine'
+             )
+        )
     ) %>%
     na.omit()
 
@@ -33,16 +44,21 @@ raw <- read_excel(
 ## raw %>% arrange( desc(lat) ) %>% head() %>% View
 
 
+
 ## https://r-graph-gallery.com/330-bubble-map-with-ggplot2.html
 
 world <- map_data('world')
 
-ggplot() +
+mapa <- ggplot() +
     geom_map(
         data = world, map = world,
         aes(long, lat, map_id = region),
         color = "darkgrey", fill = "lightgrey", size = 0.1, alpha = 0.3
     ) +
+    annotation_north_arrow(
+        location = "br"
+       ,style = north_arrow_fancy_orienteering
+    ) + 
     geom_point(
         data = raw
        ,aes(
@@ -61,6 +77,25 @@ ggplot() +
     theme_void() +
     theme( legend.position = 'left') +
     scale_size_continuous( labels = levels( raw$phase ) ) +
-    coord_quickmap() 
+    coord_quickmap()
 
+ggsave(
+    filename = '../img/mapa.png'
+    ,plot = mapa
+    ,width = 14
+    ,height = 6
+)
 
+ggsave(
+    filename = '../img/mapa.pdf'
+    ,plot = mapa
+    ,width = 14
+    ,height = 6
+)
+
+ggsave(
+    filename = '../img/mapa.svg'
+    ,plot = mapa
+    ,width = 14
+    ,height = 6
+)
