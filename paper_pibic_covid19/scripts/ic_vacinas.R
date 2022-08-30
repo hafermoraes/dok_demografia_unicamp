@@ -8,7 +8,7 @@ library(stringr)
 library(ggspatial)
 
 raw <- read_excel(
-    path = '../raw/Dados_Plotagem_Corrigido_v2.xlsx'
+    path = '../raw/Dados_Plotagem_Corrigido_v3.xlsx' 
    ,sheet = 'Dados_plotagem'
 ) %>%
     filter( !is.na(lat) ) %>% 
@@ -43,11 +43,25 @@ raw <- read_excel(
 ## raw %>% count(plataforma, plataforma_reclass)
 ## raw %>% arrange( desc(lat) ) %>% head() %>% View
 
-
-
 ## https://r-graph-gallery.com/330-bubble-map-with-ggplot2.html
 
 world <- map_data('world')
+
+## world %>%
+##     filter( region %in% c('Portugal','Spain') ) %>%
+##     group_by( region ) %>%
+##     summarise(
+##         lat_min = min(lat)
+##         ,lat_max = max(lat)
+##         ,lon_min = min(long)
+##         ,lon_max = max(long)
+##     ) 
+
+## raw %>%
+##     filter(
+##     (lat >= 37 & lat <= 42.1 & long >= -9.48 & long <= -6.21) | # Portugal
+##     (lat >= 36 & lat <= 43.8 & long >= -9.24 & long <= 4.32)    # Espanha
+##     ) %>% View
 
 mapa <- ggplot() +
     geom_map(
@@ -69,10 +83,10 @@ mapa <- ggplot() +
         )
     ) +
     labs(
-        title = 'Mapa da distribuição global do desenvolvimento de vacinas para Covid-19 em fase clínica'
-       ,caption = 'Fonte: Autoria própria a partir de OMS (2022)'
-       ,size = 'Estágio clínico'
-       ,color = 'Plataforma'
+        title = '' # 'Mapa da distribuição global do desenvolvimento de vacinas para Covid-19 em fase clínica'
+       ,caption = 'Source: Authors based on data from WHO (2022)'
+       ,size = 'Clinical stage'
+       ,color = 'Platform'
     ) +
     theme_void() +
     theme( legend.position = 'left') +
