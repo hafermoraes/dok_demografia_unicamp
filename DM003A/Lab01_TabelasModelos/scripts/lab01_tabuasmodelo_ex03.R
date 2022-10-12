@@ -4,6 +4,8 @@ library(tidyr)    # pivot_longer, pivot_wider
 library(ggplot2)  # ggplot, geom_line, facet_wrap, ...
 library(stringr)  # str_extract
 
+## Tábuas Coale & Demeny Padrão Oeste
+
 ## Coale & Demeny West Female Table
 lx_west_female <- tribble(
     ~idade, ~n1, ~n2, ~n3, ~n4, ~n5, ~n6, ~n7, ~n8, ~n9, ~n10, ~n11, ~n12, ~n13, ~n14, ~n15, ~n16, ~n17, ~n18, ~n19, ~n20, ~n21, ~n22, ~n23, ~n24, ~n25,
@@ -156,20 +158,48 @@ tvpe2010_female <- tribble(
     "90 anos e mais",15806,3507,0.22188,90,1,17091,17091,77028,77028,4.5
 )
 
-## Níveis de Mortalidade Coale & Demeny Padrão Oeste
-dat_ex <- bind_rows(
-    ex_west_female %>% mutate( sexo = 'feminino' ),
-    ex_west_male %>% mutate( sexo = 'masculino' )
+tvpe2010 <- bind_rows(
+    tvpe2010_female %>% mutate( sexo = 'feminino', idade = c(0,1,seq(from = 5, to = 90, by = 5)) ),
+    tvpe2010_male %>% mutate( sexo = 'masculino', idade = c(0,1,seq(from = 5, to = 90, by = 5)) )
 ) %>%
-    mutate( idade = as.numeric(idade) ) %>%
+        mutate(
+        idade = factor(
+            as.character(idade),
+            levels = c(0,1,seq(from = 5, to = 95, by = 5)),
+            labels = c('<1','1-4','5-9','10-14','15-19','20-24','25-29',
+                       '30-34','35-39','40-44','45-49','50-54','55-59',
+                       '60-64','65-69','70-74','75-79','80-84','85-89',
+                       '90-94','95+'
+                       )
+        )
+    )
+
+
+## esperança de vida (e_x)
+dat_ex <- bind_rows(
+    ex_west_female %>% mutate( sexo = 'feminino', idade = c(0,1,seq(from = 5, to = 95, by = 5)) ),
+    ex_west_male %>% mutate( sexo = 'masculino', idade = c(0,1,seq(from = 5, to = 95, by = 5)) )
+) %>%
     select( sexo, idade, n1:n25) %>%
     pivot_longer(
         cols = n1:n25
        ,names_to = 'ref'
        ,values_to = 'ex'
+    ) %>%
+    mutate(
+        idade = factor(
+            as.character(idade),
+            levels = c(0,1,seq(from = 5, to = 95, by = 5)),
+            labels = c('<1','1-4','5-9','10-14','15-19','20-24','25-29',
+                       '30-34','35-39','40-44','45-49','50-54','55-59',
+                       '60-64','65-69','70-74','75-79','80-84','85-89',
+                       '90-94','95+'
+                       )
+        )
     )
 
 
+## sobreviventes (l_x)
 dat_lx <- bind_rows(
     ## Níveis de Mortalidade Coale & Demeny Padrão Oeste
     bind_rows(
@@ -183,20 +213,20 @@ dat_lx <- bind_rows(
        ,names_to = 'ref'
        ,values_to = 'lx'
     )
-    ## Tábuas de Vida Brasileiras (Censo 2010)
+    ## Tábuas de Vida Pernambucanas (Censo 2010)
    ,bind_rows(
         tvpe2010_male %>%
         transmute(
             sexo = 'masculino',
             idade = c(0,1,seq(from = 5, to = 90, by = 5)),
-            ref = 'TV_PE2010',
+            ref = 'lx_PE2010',
             lx = lx / 1e5
         ),
         tvpe2010_female %>%
         transmute(
             sexo = 'feminino',
             idade = c(0,1,seq(from = 5, to = 90, by = 5)),
-            ref = 'TV_PE2010',
+            ref = 'lx_PE2010',
             lx = lx / 1e5
         )
     ) 
@@ -214,7 +244,8 @@ dat_lx <- bind_rows(
     )
 
 
-## Cálculo dos níveis inferiores, superiores, implícitos e esperança de vida implícita de Coale & Demeny
+## Cálculo dos níveis inferiores, superiores e implícitos, esperança de vida implícita e lx padrão de Coale & Demeny
+## nvs é abreviação de 'níveis' :)
 nvs <- dat_lx %>%
     pivot_wider(
         id_cols = c(sexo, idade ),
@@ -228,13 +259,13 @@ nvs <- dat_lx %>%
         lx_inf = 0,
         lx_sup = 0,
         nivel_interpolado = 0,
-        ex_implicita = 0
+        e0_implicita = 0
     ) %>%
-    select( sexo, idade, TV_PE2010, CoaleDemeny_West, n_inf, n_sup, lx_inf, lx_sup, nivel_interpolado, ex_implicita, n1:n25 ) %>%
+    select( sexo, idade, lx_PE2010, CoaleDemeny_West, n_inf, n_sup, lx_inf, lx_sup, nivel_interpolado, e0_implicita, n1:n25 ) %>%
     na.omit() %>%
     as.data.frame
 
-lref <- 'TV_PE2010'
+lref <- 'lx_PE2010'
 for(i in 1:nrow(nvs)){
     ## lx_obs < n1 ou lx_obs > n25 ...
     if(  ( nvs[i,lref] < nvs[i,'n1'] ) | ( nvs[i,3] > nvs[i,'n25'] ) ){
@@ -260,12 +291,74 @@ for(i in 1:nrow(nvs)){
     }
 }
 
-nvs %>% names
-    mutate(
-        n_inf = as.numeric( n_inf),
-        n_sup = as.numeric( n_sup)
-    ) %>%
-    
-        
-nvs %>% filter( idade %in% c('1-4','5-9','20-24','45-49') ) %>% View
+nvs %>% View
 
+## nivel médio
+nv_medio <- nvs %>%
+    filter( idade %in% c('1-4','5-9','20-24','45-49') ) %>%
+    group_by( sexo ) %>%
+    summarise(
+        nivel_medio = round( mean( nivel_interpolado ), 4 )
+       ,fator_nivel_padrao = nivel_medio - floor( nivel_medio) 
+    ) 
+    
+nvs <- nvs %>%
+    left_join( nv_medio ) %>%
+    mutate( lx_padrao = 0 ) 
+
+## nvs %>% View
+
+for( i in 1:nrow(nvs) ) {
+    ## nível médio (por seox) das tábuas de Coale & Demeny (para idades 1, 5, 20 e 45 -- conforme enunciado)
+    nv <- floor( nvs[i,'nivel_medio'] )
+    fator <- nvs[i,'fator_nivel_padrao']
+    ## cálculo da esperança de vida ao nascer implícita
+    ex <- dat_ex %>%
+        filter(
+            sexo == nvs[i, 'sexo'],
+            idade == nvs[i, 'idade'],
+            (ref == paste0('n',nv)) | (ref == paste0('n',nv+1))
+        ) %>%
+        pivot_wider(
+            id_cols = c('sexo','idade'),
+            names_from = ref,
+            values_from = ex
+        ) %>%
+        rename( inf = 3, sup = 4 )
+    nvs[i, 'e0_implicita'] <- ( ex[1,'sup'] - ex[1,'inf'] ) * fator + ex[1,'inf']
+    ## cálculo da lx padrão
+    lx <- nvs[i, c( paste0('n', nv), paste0('n', nv+1 )) ] %>% rename( inf = 1, sup = 2 )
+    nvs[i, 'lx_padrao'] <- ( lx[1,'sup'] - lx[1,'inf'] ) * fator + lx[1,'inf']
+}
+
+## item 3(a)
+nvs %>%
+    select( sexo, idade, lx_PE2010, lx_padrao ) %>%
+    pivot_longer(
+        cols = 3:4,
+        names_to = 'tabua',
+        values_to = 'lx'
+    ) %>%
+    ggplot( aes( x = idade, y = lx, group = tabua, color = tabua ) ) +
+    geom_line() +
+    labs(
+        x = 'idade',
+        y = 'lx (radix = 1)',
+        group = '',
+        color = ''
+    ) +
+    theme(legend.position = "top", axis.text.x = element_text(angle = 90)) + 
+    facet_wrap( ~sexo )
+
+## item 3(b)
+nvs %>%
+    filter( idade %in% c('1-4','5-9','20-24','45-49') ) %>%
+    group_by( sexo ) %>%
+    summarise(
+        e0_media = mean( e0_implicita )
+    ) %>%
+    left_join(
+        tvpe2010 %>% filter( idade == '<1' ) %>% select( sexo, ex)
+    )
+
+## item 3(c)
