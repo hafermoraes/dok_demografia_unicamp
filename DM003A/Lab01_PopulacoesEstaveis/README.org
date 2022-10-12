@@ -1,0 +1,33 @@
+#+OPTIONS: tex:t
+#+STARTUP: latexpreview      # C-c C-x C-l (org-latex-preview)
+
+* Croatia, Mean age at birth
+
+  É o $\mu$ na fórmula $r = \frac{\log(TLR)}{\mu}$.
+  
+  https://www.humanfertility.org/cgi-bin/getfile.plx?f=HRV\20220308\HRVmabRR.txt
+
+* Croatia, Total live births
+
+** Fonte 1 (Human Fertility Database)
+   Número de nascidos vivos, precisa ser multiplicado pela razão de sexos ao nascer para obter nascimentos femininos, usado no cálculo da taxa líquida de reprodução.
+
+   https://www.humanfertility.org/cgi-bin/getfile.plx?f=HRV\20220308\HRVtotbirthsRR.txt
+
+** Fonte 2 (Human Mortality Database)
+
+   Número de nascidos vivos por sexo e por ano
+
+   https://mortality.org/File/GetDocument/hmd.v6/HRV/STATS/Births.txt
+  
+* Croatia, Female Life Tables
+
+  ${}_5L_x$
+  
+  https://mortality.org/File/GetDocument/hmd.v6/HRV/STATS/fltper_5x1.txt
+
+* Croatia, Population size
+
+  Por sexo, ano e grupo etário quinquenal para cálculo da taxa líquida de reprodução -- $TLR$.
+
+  https://mortality.org/File/GetDocument/hmd.v6/HRV/STATS/Population5.txt

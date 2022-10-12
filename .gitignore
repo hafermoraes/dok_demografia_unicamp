@@ -1,3 +1,10 @@
+# raw data from Human Fertility Database and Human Mortality Database
+DM003A/Lab01_PopulacoesEstaveis/raw/
+DM003A/Lab01_PopulacoesEstaveis/refs/
+
+DM003A/Lab01_TabelasModelos/raw/
+DM003A/Lab01_TabelasModelos/refs/
+
 # History files
 .Rhistory
 .Rapp.history
