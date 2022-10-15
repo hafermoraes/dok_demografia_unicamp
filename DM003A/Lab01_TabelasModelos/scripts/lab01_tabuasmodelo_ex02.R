@@ -156,7 +156,7 @@ dat <- bind_rows(
         )
     )
 
-dat %>% 
+plot1 <- dat %>% 
     filter( ref != 'TV_BR2010' ) %>%
     ggplot( aes( x = idade, y = lx, group = ref ) ) +
     geom_line( color = 'lightgrey'  ) +
@@ -172,4 +172,5 @@ dat %>%
     theme(legend.position = "top", axis.text.x = element_text(angle = 90)) + 
     facet_wrap( ~sexo ) 
 
+ggsave(filename = '../img/lab01_ex02.png', plot = plot1, width = 10, height = 6)
 

@@ -76,7 +76,7 @@ pe2020_sim <- sim %>%
     rename( obitos = n) %>%
     na.omit() 
 
-bind_rows( pe2010_censo, pe2010_rc, pe2020_sim ) %>%
+plot1 <- bind_rows( pe2010_censo, pe2010_rc, pe2020_sim ) %>%
     mutate( idade = factor( idade, levels = c('Menos de 1 ano', '1 a 4 anos', '5 a 9 anos', '10 a 14 anos',
                        '15 a 19 anos','20 a 24 anos','25 a 29 anos','30 a 34 anos',
                        '35 a 39 anos','40 a 44 anos','45 a 49 anos','50 a 54 anos',
@@ -94,4 +94,8 @@ bind_rows( pe2010_censo, pe2010_rc, pe2020_sim ) %>%
         y = 'número de óbitos'
         #caption = 'Fontes: Censo - Tabela 3223/SIDRA, Registro Civil - Tabela 2682 e SIM - Pacote "microdatasus" do R. Acesso em 12/10/2022. Elaboração própria.'
     ) + 
+    theme(legend.position = "top", axis.text.x = element_text(angle = 90)) + 
     facet_wrap( ~sexo, ncol=2 )
+
+ggsave(filename = '../img/lab01_ex01.png', plot = plot1, width = 10, height = 6)
+

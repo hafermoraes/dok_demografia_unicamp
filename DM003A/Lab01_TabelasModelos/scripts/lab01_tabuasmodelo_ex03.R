@@ -3,6 +3,7 @@ library(dplyr)    # mutate, transmute, ...
 library(tidyr)    # pivot_longer, pivot_wider
 library(ggplot2)  # ggplot, geom_line, facet_wrap, ...
 library(stringr)  # str_extract
+library(readr)    # write_csv
 
 ## Tábuas Coale & Demeny Padrão Oeste
 
@@ -162,7 +163,7 @@ tvpe2010 <- bind_rows(
     tvpe2010_female %>% mutate( sexo = 'feminino', idade = c(0,1,seq(from = 5, to = 90, by = 5)) ),
     tvpe2010_male %>% mutate( sexo = 'masculino', idade = c(0,1,seq(from = 5, to = 90, by = 5)) )
 ) %>%
-        mutate(
+    mutate(
         idade = factor(
             as.character(idade),
             levels = c(0,1,seq(from = 5, to = 95, by = 5)),
@@ -259,39 +260,49 @@ nvs <- dat_lx %>%
         lx_inf = 0,
         lx_sup = 0,
         nivel_interpolado = 0,
-        e0_implicita = 0
+        ex_implicita = 0,
+        e0x_implicita = 0
     ) %>%
-    select( sexo, idade, lx_PE2010, CoaleDemeny_West, n_inf, n_sup, lx_inf, lx_sup, nivel_interpolado, e0_implicita, n1:n25 ) %>%
+    select( sexo, idade, lx_PE2010, CoaleDemeny_West, n_inf, n_sup, lx_inf, lx_sup, nivel_interpolado, ex_implicita, e0x_implicita, n1:n25 ) %>%
     na.omit() %>%
     as.data.frame
 
 lref <- 'lx_PE2010'
 for(i in 1:nrow(nvs)){
-    ## lx_obs < n1 ou lx_obs > n25 ...
-    if(  ( nvs[i,lref] < nvs[i,'n1'] ) | ( nvs[i,3] > nvs[i,'n25'] ) ){
-        nvs[i,'CoaleDemeny_West'] <- 'NA'
+    ## lx_obs < n1 ...
+    if( nvs[i,lref] < nvs[i,'n1'] ) {
+        nvs[i,'CoaleDemeny_West'] <- 'lx(obs) < lx(n1)'
         nvs[i,'n_inf'] <- 'NA'
-        nvs[i,'n_sup'] <- 'NA'
-        nvs[i,'lx_inf'] <- nvs[i, lref]
-        nvs[i,'lx_sup'] <- nvs[i, lref]
+        nvs[i,'n_sup'] <- 1
+        nvs[i,'lx_inf'] <- nvs[i, lref]  ## nao seria nvs[ i, 'n1'] ??
+        nvs[i,'lx_sup'] <- nvs[i, lref]  ## nao seria nvs[ i, 'n1'] ??
         next
     }
-    ## encontra lx_inf, lx_sup, nível médio 
-    for(j in 11:(ncol(nvs)-1) ){
+    ## lx_obs > n25 ...
+    if( nvs[i,lref] > nvs[i,'n25'] ) {
+        nvs[i,'CoaleDemeny_West'] <- 'lx(obs) > lx(n25)'
+        nvs[i,'n_inf'] <- 25
+        nvs[i,'n_sup'] <- 'NA'
+        nvs[i,'lx_inf'] <- nvs[i, lref]  ## nao seria nvs[ i, 'n25'] ??
+        nvs[i,'lx_sup'] <- nvs[i, lref]  ## nao seria nvs[ i, 'n25'] ??
+        next
+    }
+    ## encontra lx_inf, lx_sup, nível interpolado
+    for(j in 12:(ncol(nvs)-1) ){  ## compara lx(obs) com todos os niveis entre n1 e n25 ...
         if( ( nvs[i,lref] >= nvs[i,j] ) & ( nvs[i,lref] <= nvs[i,j+1] ) ){
             nvs[i,'CoaleDemeny_West'] <- paste0( 'lx(',names(nvs)[j], ') <= lx(obs) <= lx(', names(nvs)[j+1],')')
             nvs[i,'n_inf'] <- str_extract( names(nvs)[j], '\\d+')
             nvs[i,'n_sup'] <- str_extract( names(nvs)[j+1], '\\d+')
             nvs[i,'lx_inf'] <- nvs[i, j]
             nvs[i,'lx_sup'] <- nvs[i, j+1]
-            ## interpolação linear para encontrar 'nível médio'
+            ## interpolação linear para encontrar 'nível interpolado'
             nvs[i,'nivel_interpolado'] <- ( nvs[i,lref] - nvs[i,'lx_inf'] ) / ( nvs[i,'lx_sup'] - nvs[i,'lx_inf'] ) + as.numeric( nvs[i,'n_inf'] )
             break
         }
     }
 }
 
-nvs %>% View
+## nvs %>% View
 
 ## nivel médio
 nv_medio <- nvs %>%
@@ -301,18 +312,26 @@ nv_medio <- nvs %>%
         nivel_medio = round( mean( nivel_interpolado ), 4 )
        ,fator_nivel_padrao = nivel_medio - floor( nivel_medio) 
     ) 
+
+## tabela 1
+nvs %>%
+    filter( idade %in% c('1-4','5-9','20-24','45-49') ) %>%
+    select( sexo, idade, nivel_interpolado ) %>%
+    left_join( nv_medio %>% select( sexo, nivel_medio) ) %>%
+    write_csv2( '../data/lab01_ex03_tabela1.csv')
     
 nvs <- nvs %>%
     left_join( nv_medio ) %>%
     mutate( lx_padrao = 0 ) 
 
 ## nvs %>% View
+## nvs %>% names
 
 for( i in 1:nrow(nvs) ) {
-    ## nível médio (por seox) das tábuas de Coale & Demeny (para idades 1, 5, 20 e 45 -- conforme enunciado)
+    ## nível médio (por sexo) das tábuas de Coale & Demeny (para idades 1, 5, 20 e 45 -- conforme enunciado)
     nv <- floor( nvs[i,'nivel_medio'] )
     fator <- nvs[i,'fator_nivel_padrao']
-    ## cálculo da esperança de vida ao nascer implícita
+    ## cálculo da esperança de vida implícita
     ex <- dat_ex %>%
         filter(
             sexo == nvs[i, 'sexo'],
@@ -325,14 +344,35 @@ for( i in 1:nrow(nvs) ) {
             values_from = ex
         ) %>%
         rename( inf = 3, sup = 4 )
-    nvs[i, 'e0_implicita'] <- ( ex[1,'sup'] - ex[1,'inf'] ) * fator + ex[1,'inf']
+    nvs[i, 'ex_implicita'] <- ( ex[1,'sup'] - ex[1,'inf'] ) * fator + ex[1,'inf']
+    ## cálculo da esperança de vida ao nascer implícita
+    e0x <- dat_ex %>%
+        filter(
+            sexo == nvs[i, 'sexo'],
+            idade == '<1',
+            (ref == paste0('n',nv)) | (ref == paste0('n',nv+1))
+        ) %>%
+        pivot_wider(
+            id_cols = c('sexo','idade'),
+            names_from = ref,
+            values_from = ex
+        ) %>%
+        rename( inf = 3, sup = 4 )
+    nvs[i, 'e0x_implicita'] <- ( e0x[1,'sup'] - e0x[1,'inf'] ) * fator + e0x[1,'inf']
     ## cálculo da lx padrão
     lx <- nvs[i, c( paste0('n', nv), paste0('n', nv+1 )) ] %>% rename( inf = 1, sup = 2 )
     nvs[i, 'lx_padrao'] <- ( lx[1,'sup'] - lx[1,'inf'] ) * fator + lx[1,'inf']
 }
 
 ## item 3(a)
+## tabela 2
 nvs %>%
+    select( sexo, idade, lx_PE2010, CoaleDemeny_West, n_inf, nivel_interpolado, n_sup, lx_inf, lx_sup) %>%
+    filter( idade %in% c('1-4','5-9','20-24','45-49') ) %>%
+    write_csv2( '../data/lab01_ex03_tabela2.csv')
+
+## Gráfico comparativo das lx reais e modelo ajustada
+plot1 <- nvs %>%
     select( sexo, idade, lx_PE2010, lx_padrao ) %>%
     pivot_longer(
         cols = 3:4,
@@ -348,17 +388,35 @@ nvs %>%
         color = ''
     ) +
     theme(legend.position = "top", axis.text.x = element_text(angle = 90)) + 
-    facet_wrap( ~sexo )
+    facet_wrap( ~sexo, ncol=1 )
+
+ggsave(filename = '../img/lab01_ex03_a.png', plot = plot1, width = 8, height = 6)
 
 ## item 3(b)
+## esperança de vida média (tabela 3)
 nvs %>%
-    filter( idade %in% c('1-4','5-9','20-24','45-49') ) %>%
-    group_by( sexo ) %>%
+    filter( idade %in% c('1-4','5-9','20-24','45-49') ) %>% 
+    group_by( sexo, idade ) %>%
     summarise(
-        e0_media = mean( e0_implicita )
+        ex_media = mean( ex_implicita )
     ) %>%
     left_join(
-        tvpe2010 %>% filter( idade == '<1' ) %>% select( sexo, ex)
-    )
+        ## tvpe2010 %>% filter( idade == '<1' ) %>% transmute( sexo, ex_pe2010 = ex)
+        tvpe2010 %>% transmute( sexo, idade, ex_pe2010 = ex)
+    ) %>% 
+    write_csv2( '../data/lab01_ex03_tabela3.csv')
+
+## esperança de vida ao nascer média (tabela 3)
+nvs %>%
+    filter( idade %in% c('1-4','5-9','20-24','45-49') ) %>% 
+    group_by( sexo ) %>%
+    summarise(
+        e0x_media = mean( e0x_implicita )
+    ) %>%
+    left_join(
+        tvpe2010 %>% filter( idade == '<1' ) %>% transmute( sexo, e0x_pe2010 = ex)
+    ) %>% 
+    write_csv2( '../data/lab01_ex03_tabela4.csv')
 
 ## item 3(c)
+## analisado diretamente no googlesheets...
