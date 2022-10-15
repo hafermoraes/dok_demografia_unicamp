@@ -111,7 +111,7 @@ ex_west_male <- tribble(
 )
 
 ## Tábua de vida masculina de Pernambuco em 2010
-tvpe2010_male <- tribble(
+tvpe2010censo_male <- tribble(
     ~idade, ~populacao, ~obitos, ~mxn, ~x, ~qxn, ~lx, ~dxn, ~Lxn, ~Tx, ~ex,
     "Menos de 1 ano",66758,1427,0.02138,0,0.02098,100000,2098,98118,6682774,66.8,
     "1 a 4 anos",277508,227,0.00082,1,0.00327,97902,320,390838,6584656,67.3,
@@ -145,7 +145,7 @@ tvpe2010_male <- tribble(
     )
 
 ## Tábua de vida feminina de Pernambuco em 2010
-tvpe2010_female <- tribble(
+tvpe2010censo_female <- tribble(
     ~idade, ~populacao, ~obitos, ~mxn, ~x, ~qxn, ~lx, ~dxn, ~Lxn, ~Tx, ~ex,
     "Menos de 1 ano",64528,1041,0.01614,0,0.01591,100000,1591,98565,7546599,75.5,
     "1 a 4 anos",268115,194,0.00072,1,0.00289,98409,285,392926,7448034,75.7,
@@ -290,9 +290,9 @@ tabua_vida <- function(tv){
 tvpe2010sim_female <- tabua_vida(
     data.frame(
         sexo = 'feminino',
-        tvpe2010_female[,'idade'],
-        tvpe2010_female[,'populacao'],
-        pe2020_sim[,'Feminino'] ) %>%
+        tvpe2010censo_female[,'idade'],
+        tvpe2010censo_female[,'populacao'],
+        pe2020_sim[,'Feminino'] ) %>% # Óbitos do Datasus/SIM
     rename( x = idade, nNx = populacao, nDx = Feminino ) %>%
     mutate(
         nmx = nDx / nNx,
@@ -312,9 +312,9 @@ tvpe2010sim_female <- tabua_vida(
 tvpe2010sim_male <- tabua_vida(
     data.frame(
         sexo = 'masculino',
-        tvpe2010_male[,'idade'],
-        tvpe2010_male[,'populacao'],
-        pe2020_sim[,'Masculino'] ) %>%
+        tvpe2010censo_male[,'idade'],
+        tvpe2010censo_male[,'populacao'],
+        pe2020_sim[,'Masculino'] ) %>% # Óbitos do Datasus/SIM
     rename( x = idade, nNx = populacao, nDx = Masculino ) %>%
     mutate(
         nmx = nDx / nNx,
@@ -347,8 +347,6 @@ tvpe2010sim <- bind_rows(
                        )
         )
     )
-
-## tvpe2010sim %>% View
 
 ## esperança de vida (e_x)
 dat_ex <- bind_rows(
@@ -540,24 +538,60 @@ for( i in 1:nrow(nvs) ) {
     nvs[i, 'lx_padrao'] <- ( lx[1,'sup'] - lx[1,'inf'] ) * fator + lx[1,'inf']
 }
 
-## Tabela 6
-nvs %>%
-    select( sexo, idade, lx_PE2010_SIM, CoaleDemeny_West, n_inf, nivel_interpolado, n_sup, lx_inf, lx_sup) %>%
+## Tabela 6 (lx_obs, lx_pd e logitos para adultos/crianças para cálculo do alfa e do beta
+logitos <- nvs %>% 
     filter( idade %in% c('1-4','5-9','20-24','45-49') ) %>%
-    write_csv2( '../data/lab01_ex04_tabela6.csv')
+    transmute(
+        sexo, idade,
+        crianca_adulto = case_when(
+            idade %in% c('1-4','5-9') ~ 'c',
+            TRUE ~ 'a'
+        ),
+        lx_obs = lx_PE2010_SIM,
+        lx_padrao,
+        logito_obs = 0.5 * log( (1 - lx_obs)/ lx_obs),
+        logito_padrao = 0.5 * log( (1 - lx_padrao)/ lx_padrao)
+    )
 
-## esperança de vida média (tabela 7)
-nvs %>%
-    filter( idade %in% c('1-4','5-9','20-24','45-49') ) %>% 
-    group_by( sexo, idade ) %>%
+logitos %>%
+    write_csv2( '../data/lab01_ex04_tabela6_logitos.csv')
+
+## Tabela 7 (alfa e beta por sexo)
+alfa_beta <- logitos %>%
+    group_by( sexo, crianca_adulto ) %>%
     summarise(
-        ex_media = mean( ex_implicita )
+        avg_obs = mean( logito_obs),
+        avg_pd = mean( logito_padrao)
     ) %>%
-    left_join(
-        ## tvpe2010 %>% filter( idade == '<1' ) %>% transmute( sexo, ex_pe2010 = ex)
-        tvpe2010sim %>% transmute( sexo, idade, ex_pe2010 = ex)
-    ) %>% 
-    write_csv2( '../data/lab01_ex04_tabela7.csv')
+    pivot_longer( cols = 3:4 ) %>%
+    mutate( ref = paste0( crianca_adulto, '_', name ) ) %>%
+    pivot_wider( id_cols = sexo, names_from = ref, values_from = value ) %>%
+    mutate(
+        beta = ( a_avg_obs - c_avg_obs)/( a_avg_pd - c_avg_pd),
+        alfa = c_avg_obs - beta*c_avg_pd
+    ) 
+    
+alfa_beta %>% 
+    write_csv2( '../data/lab01_ex04_tabela7_alfas_betas.csv')
+
+## Tabela 8
+nvs %>% 
+    transmute(
+        sexo, idade,
+        lx_obs = lx_PE2010_SIM,
+        lx_padrao,
+        logito_obs = ifelse( lx_obs == 1, NA, 0.5 * log( (1 - lx_obs)/ lx_obs) ),
+        logito_padrao = ifelse( lx_padrao == 1, NA, 0.5 * log( (1 - lx_padrao)/ lx_padrao))
+    ) %>%
+    left_join( alfa_beta %>% select(sexo, alfa, beta) ) %>% 
+    mutate(
+        logito_estimado = alfa + beta * logito_padrao,
+        lx_estimado = ifelse( lx_padrao == 1, 1, 1 / (1 + exp(2*logito_estimado)) )
+    ) %>% View
+
+
+
+
 
 
 
@@ -565,8 +599,8 @@ nvs %>%
 ## comparações entre tábua original do censo e da tabua recalculada usando Datasus/SIM
 compara <- bind_rows(
     ## Tábuas de vida originais para Pernambuco ( Censo 2010 )
-    tvpe2010_male %>% transmute( fonte = 'PE2010_Censo', sexo = 'masculino', idade, lx = lx/1e5, ex ),
-    tvpe2010_female %>% transmute( fonte = 'PE2010_Censo', sexo = 'feminino', idade, lx = lx/1e5, ex ),
+    tvpe2010censo_male %>% transmute( fonte = 'PE2010_Censo', sexo = 'masculino', idade, lx = lx/1e5, ex ),
+    tvpe2010censo_female %>% transmute( fonte = 'PE2010_Censo', sexo = 'feminino', idade, lx = lx/1e5, ex ),
     ## Tábuas de vida recalculadas para Pernambuco usando óbitos do SIM/Datasus
     tvpe2010sim_male %>% transmute( fonte = 'PE2010_Recalculada_SIM', sexo, idade = x, lx, ex ),
     tvpe2010sim_female %>% transmute( fonte = 'PE2010_Recalculada_SIM', sexo, idade = x, lx, ex )
@@ -598,14 +632,14 @@ plot2 <- compara %>%
 ggsave(filename = '../img/lab01_ex04_ex.png', plot = plot2, width = 8, height = 6)
 ## --------------------------------------------------------
 
-tvpe2010 <- bind_rows( 
-    tvpe2010_female %>% mutate( sexo = 'feminino', idade, lx_PE2010_Censo = lx / 1e5 ),
-    tvpe2010_male %>% mutate( sexo = 'masculino', idade, lx_PE2010_Censo = lx / 1e5 )
+tvpe2010censo <- bind_rows( 
+    tvpe2010censo_female %>% mutate( sexo = 'feminino', idade, lx_PE2010_Censo = lx / 1e5 ),
+    tvpe2010censo_male %>% mutate( sexo = 'masculino', idade, lx_PE2010_Censo = lx / 1e5 )
 )
 
 ## Gráfico comparativo das lx reais e modelo ajustada
 plot3 <- nvs %>%
-    left_join( tvpe2010 %>% select( sexo, idade, lx_PE2010_Censo ) ) %>%
+    left_join( tvpe2010censo %>% select( sexo, idade, lx_PE2010_Censo ) ) %>%
     select( sexo, idade, lx_PE2010_SIM, lx_PE2010_Censo, lx_padrao ) %>%
     pivot_longer(
         cols = 3:5,
@@ -628,7 +662,7 @@ ggsave(filename = '../img/lab01_ex04_compara.png', plot = plot3, width = 8, heig
 
 dat <- bind_rows(
     dat_lx,
-    tvpe2010 %>% transmute( sexo, idade, ref = 'lx_PE2010_Censo', lx = lx / 1e5) )
+    tvpe2010censo %>% transmute( sexo, idade, ref = 'lx_PE2010_Censo', lx = lx / 1e5) )
 
 plot4 <- dat %>% 
     filter( ref != 'lx_PE2010_Censo', ref != 'lx_PE2010_SIM' ) %>%
