@@ -162,7 +162,7 @@ plot1 <- dat %>%
     geom_line( color = 'lightgrey'  ) +
     geom_line( aes( x = idade, y = lx, color = ref), data = dat %>% filter( ref %in% ns ) %>% mutate( ref = paste0('Coale&Demeny_West_',ref))) +
     geom_line( aes( x = idade, y = lx, group = ref, color = ref ), linetype = 'dashed', data = dat %>% filter( ref == 'TV_BR2010' ) ) +
-    geom_text( aes( x = idade, y = lx, label = ref ), data = dat %>% filter( idade == '55-59', ref != 'TV_BR2010' ), size = 3 ) + 
+    geom_text( aes( x = idade, y = lx, label = ref ), data = dat %>% filter( idade == '55-59', ref != 'TV_BR2010' ), size = 2 ) + 
     labs(
         x = 'idade',
         y = 'lx (radix = 1)',
@@ -172,5 +172,5 @@ plot1 <- dat %>%
     theme(legend.position = "top", axis.text.x = element_text(angle = 90)) + 
     facet_wrap( ~sexo ) 
 
-ggsave(filename = '../img/lab01_ex02.png', plot = plot1, width = 10, height = 6)
+ggsave(filename = '../img/lab01_ex02.png', plot = plot1, width = 8, height = 5)
 

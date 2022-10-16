@@ -728,7 +728,7 @@ plot3 <- nvs %>%
     theme(legend.position = "top", axis.text.x = element_text(angle = 90)) + 
     facet_wrap( ~sexo )
 
-ggsave(filename = '../img/lab01_ex04_compara.png', plot = plot3, width = 8, height = 6)
+ggsave(filename = '../img/lab01_ex04_compara.png', plot = plot3, width = 10, height = 4)
 
 
 dat <- bind_rows(

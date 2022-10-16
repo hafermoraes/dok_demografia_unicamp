@@ -97,5 +97,5 @@ plot1 <- bind_rows( pe2010_censo, pe2010_rc, pe2020_sim ) %>%
     theme(legend.position = "top", axis.text.x = element_text(angle = 90)) + 
     facet_wrap( ~sexo, ncol=2 )
 
-ggsave(filename = '../img/lab01_ex01.png', plot = plot1, width = 10, height = 6)
+ggsave(filename = '../img/lab01_ex01.png', plot = plot1, width = 10, height = 4)
 

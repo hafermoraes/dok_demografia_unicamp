@@ -388,9 +388,9 @@ plot1 <- nvs %>%
         color = ''
     ) +
     theme(legend.position = "top", axis.text.x = element_text(angle = 90)) + 
-    facet_wrap( ~sexo, ncol=1 )
+    facet_wrap( ~sexo )
 
-ggsave(filename = '../img/lab01_ex03_a.png', plot = plot1, width = 8, height = 6)
+ggsave(filename = '../img/lab01_ex03_a.png', plot = plot1, width = 8, height = 4)
 
 ## item 3(b)
 ## esperança de vida média (tabela 3)
