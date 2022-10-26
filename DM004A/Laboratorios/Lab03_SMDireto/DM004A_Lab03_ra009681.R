@@ -36,8 +36,10 @@ stringsAsFactors = FALSE
 )
 
 ## Biplot análise de correspondência
+png( file = './biplot_imig.png', width=700, height=400)
 plot( CA(imig) )
-fviz_ca_biplot( CA(imig), repel = TRUE )
+dev.off()
+## fviz_ca_biplot( CA(imig), repel = TRUE )
 
 ## Pernambuco, Migrações entre 2005 e 2010
 ## emigrações
@@ -65,8 +67,10 @@ stringsAsFactors = FALSE
 )
 
 ## Biplot análise de correspondência
+png( file = './biplot_emig.png', width=800, height=600)
 plot( CA(emig) )
-fviz_ca_biplot( CA(emig), repel = TRUE )
+dev.off()
+##fviz_ca_biplot( CA(emig), repel = TRUE )
 
 
 
@@ -95,9 +99,10 @@ stringsAsFactors = FALSE
 )
 names(mmig) <- rownames(mmig)
 
+png( file = './chord_mmig.png', width = 600, height = 600)
 circos.par(start.degree = 90, gap.degree = 12, track.margin = c(-0.1, 0.1), points.overflow.warning = FALSE)
 chordDiagram(mmig)
 circos.clear()
-
+dev.off()
 
 
