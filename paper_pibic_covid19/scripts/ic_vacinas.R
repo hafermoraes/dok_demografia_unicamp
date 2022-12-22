@@ -89,7 +89,7 @@ mapa <- ggplot() +
        ,color = 'Platform'
     ) +
     theme_void() +
-    theme( legend.position = 'left') +
+    theme(legend.position = 'left') +
     scale_size_continuous( labels = levels( raw$phase ) ) +
     coord_quickmap()
 
@@ -112,4 +112,31 @@ ggsave(
     ,plot = mapa
     ,width = 14
     ,height = 6
+)
+
+
+ggsave(
+    filename = '../img/mapa17cmLarg.svg'
+   ,plot = mapa
+   ,device = 'svg'
+   ,width = 22.5*0.3937008
+   ,units = 'in'
+   ,height = 11*0.3937008
+)
+
+
+ggsave(
+    filename = '../img/mapa17cmLarg.svg'
+   ,plot = mapa
+   ,width = 17*0.3937008
+   ,units = 'in'
+   ,height = 10*0.3937008
+)
+
+ggsave(
+    filename = '../img/mapa17cmLarg.svg'
+   ,plot = mapa
+   ,width = 17 * 642.51 / 482
+   ,units = 'cm'
+   ,height = 9 * 642.51 / 482
 )
